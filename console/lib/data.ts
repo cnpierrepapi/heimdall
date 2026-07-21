@@ -70,6 +70,15 @@ export const WORK_KIND_LABEL: Record<string, string> = {
   term: "Glossary terms",
 };
 
+export const CHECK_LABEL: Record<string, string> = {
+  glossary_conflict: "Glossary conflict",
+  pii_scope: "PII scope",
+  undefined_column: "Undefined column",
+  low_quality_description: "Low quality description",
+  wrong_owner: "Wrong owner",
+  wrong_domain: "Wrong domain",
+};
+
 // dataset urn -> short name and a DataHub deep link
 export function datasetName(urn: string): string {
   const m = urn.match(/,([^,]+),PROD\)/);
@@ -79,8 +88,27 @@ export function datahubLink(urn: string): string {
   return `${DATAHUB_URL}/dataset/${encodeURIComponent(urn)}/`;
 }
 
-export function verdictTone(verdict: string | null): "good" | "bad" | "neutral" {
+export type Tone = "good" | "neutral" | "bad" | "none";
+
+export function verdictTone(verdict: string | null): Tone {
   if (verdict === "skilled") return "good";
   if (verdict === "worse than chance") return "bad";
+  if (verdict === "insufficient settled claims" || verdict == null) return "none";
   return "neutral";
+}
+
+export function verdictShort(verdict: string | null): string {
+  if (verdict === "skilled") return "skilled";
+  if (verdict === "worse than chance") return "worse than chance";
+  if (verdict === "not distinguishable from luck") return "luck range";
+  if (verdict === "insufficient settled claims") return "insufficient data";
+  return "unrated";
+}
+
+export function relativeTime(ts: string): string {
+  const d = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (d < 90) return `${Math.max(1, Math.round(d))}s ago`;
+  if (d < 5400) return `${Math.round(d / 60)}m ago`;
+  if (d < 129600) return `${Math.round(d / 3600)}h ago`;
+  return `${Math.round(d / 86400)}d ago`;
 }
