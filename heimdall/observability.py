@@ -32,6 +32,7 @@ WRITE = "write"
 OK = "ok"
 ERROR = "error"
 BLOCKED = "blocked"
+HELD = "held"
 
 _URN_START_RE = re.compile(r"urn:li:[a-zA-Z]+:")
 # characters that cannot appear inside a simple (non-parenthesised) urn value
@@ -228,7 +229,8 @@ class EventStore:
             " SUM(CASE WHEN op='read' THEN 1 ELSE 0 END) AS reads,"
             " SUM(CASE WHEN op='write' THEN 1 ELSE 0 END) AS writes,"
             " SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errors,"
-            " SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END) AS blocked"
+            " SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END) AS blocked,"
+            " SUM(CASE WHEN status='held' THEN 1 ELSE 0 END) AS held"
             " FROM observations GROUP BY agent_id"
         ).fetchall()
         return {
@@ -238,6 +240,7 @@ class EventStore:
                 "writes": r["writes"] or 0,
                 "errors": r["errors"] or 0,
                 "blocked": r["blocked"] or 0,
+                "held": r["held"] or 0,
             }
             for r in rows
         }

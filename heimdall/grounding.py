@@ -449,6 +449,15 @@ def _row_to_finding(row: sqlite3.Row) -> Finding:
     )
 
 
+def ground_action(
+    agent_id: str, tool: str, args: dict[str, Any], ctx: CatalogContext
+) -> list[Finding]:
+    """Ground a live tool call (before it is forwarded) into findings."""
+    from .observability import WRITE
+    event = ObservationEvent(agent_id=agent_id, tool=tool, op=WRITE, args=args or {})
+    return ground_event(event, ctx)
+
+
 def ground_events(
     events: list[ObservationEvent], ctx: CatalogContext, store: Optional[FindingStore] = None
 ) -> list[Finding]:

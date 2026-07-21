@@ -308,3 +308,57 @@ def test_capture_is_noop_without_event_store(tmp_path):
     gateway, _ = gw(tmp_path, downstream)
     content = asyncio.run(gateway.handle("search", {}))
     assert content  # no crash, normal return
+
+
+# -- C1 policy enforcement with in-flight catalog grounding -------------------
+
+from heimdall.grounding import WorldCatalogContext  # noqa: E402
+from heimdall.observability import BLOCKED as OBS_BLOCKED  # noqa: E402
+from heimdall.observability import HELD, EventStore  # noqa: E402
+from heimdall.simulator.world import build_default_world  # noqa: E402
+
+ORDERS = "urn:li:dataset:(urn:li:dataPlatform:postgres,lineworld.raw_orders,PROD)"
+PAYMENTS = "urn:li:dataset:(urn:li:dataPlatform:postgres,lineworld.raw_payments,PROD)"
+
+
+def gw_enforce(tmp_path, downstream):
+    store = ClaimStore(str(tmp_path / "ledger.db"))
+    events = EventStore(str(tmp_path / "events.db"))
+    gateway = TrustGateway(
+        downstream=downstream, store=store, trust_lookup=lambda u: None,
+        agent_id="writer", policy=POLICY_ENFORCE, min_trust=0.0,
+        event_store=events, catalog_context=WorldCatalogContext(build_default_world()),
+    )
+    return gateway, events
+
+
+def test_enforce_blocks_catalog_violating_write_in_flight(tmp_path):
+    downstream = FakeDownstream(FakeResult('{"success": true}'))
+    gateway, events = gw_enforce(tmp_path, downstream)
+    with pytest.raises(PermissionError, match="glossary term"):
+        asyncio.run(gateway.handle("update_description", {
+            "entity_urn": PAYMENTS, "column_path": "amount_usd",
+            "description": "The gross order value in usd.", "operation": "replace"}))
+    assert downstream.calls == []  # never reached the catalog
+    assert events.events()[-1].status == OBS_BLOCKED
+
+
+def test_enforce_holds_low_quality_write(tmp_path):
+    downstream = FakeDownstream(FakeResult('{"success": true}'))
+    gateway, events = gw_enforce(tmp_path, downstream)
+    out = asyncio.run(gateway.handle("update_description", {
+        "entity_urn": ORDERS, "column_path": "order_total_usd",
+        "description": "a column", "operation": "replace"}))
+    assert "held for review" in out[0].text
+    assert downstream.calls == []            # not applied
+    assert events.events()[-1].status == HELD
+
+
+def test_enforce_forwards_clean_write(tmp_path):
+    downstream = FakeDownstream(FakeResult('{"success": true}'))
+    gateway, events = gw_enforce(tmp_path, downstream)
+    asyncio.run(gateway.handle("update_description", {
+        "entity_urn": ORDERS, "column_path": "order_total_usd",
+        "description": "Total order amount in usd.", "operation": "replace"}))
+    assert len(downstream.calls) == 1        # applied
+    assert events.events()[-1].status == "ok"

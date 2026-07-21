@@ -14,10 +14,12 @@ give it:
               by the connected agent before it is forwarded. Uninstrumented
               third-party agents therefore accumulate a settled record and a
               trust score just by working through the gateway.
-  policy    - in enforce mode, mutations from agents whose settled record is
-              below the trust floor (or whose verdict is "worse than
-              chance") are rejected with an explanation instead of reaching
-              the catalog.
+  policy    - in enforce mode, each mutation is graded before it is forwarded:
+              a catalog-violating write (grounded harmful finding) or an author
+              with a worse-than-chance record is blocked; a questionable write
+              (warn finding) or a proven-mediocre author is held for review and
+              not applied; a trusted author writing cleanly is auto-accepted;
+              everything else passes with annotation.
 
 Configuration is by environment, one gateway process per connected agent:
 
@@ -25,7 +27,10 @@ Configuration is by environment, one gateway process per connected agent:
   LEDGER_DB                      path to the claim ledger database
   HEIMDALL_EVENTS              path to the observation event store
   HEIMDALL_POLICY              annotate (default) or enforce
-  HEIMDALL_MIN_TRUST           trust floor for mutations in enforce mode
+  HEIMDALL_MIN_TRUST           hard trust floor for mutations in enforce mode
+  HEIMDALL_CATALOG             grounding source for policy (world = demo)
+  HEIMDALL_ACCEPT_AT           trust at/above which a clean write auto-accepts
+  HEIMDALL_HOLD_FLOOR          proven trust below which a clean write is held
   HEIMDALL_IMPLICIT_CONFIDENCE prior confidence for implicit claims (0.6)
   DATAHUB_GMS_URL                DataHub GMS endpoint
   MCP_SERVER_DATAHUB             path to the downstream mcp-server-datahub
@@ -44,9 +49,11 @@ import mcp.types as types
 
 from .agents.common import extract_dataset_urns
 from .claims import ENRICHMENT, Claim, ClaimStore
+from .grounding import CatalogContext, ground_action
 from .observability import (
     BLOCKED,
     ERROR,
+    HELD,
     OK,
     READ,
     WRITE,
@@ -55,6 +62,14 @@ from .observability import (
     extract_entity_urns,
     sanitize_args,
     summarize_result,
+)
+from .policy import (
+    TIER_BLOCK,
+    TIER_HOLD,
+    TIER_PASS,
+    PolicyDecision,
+    PolicyThresholds,
+    decide,
 )
 from .skill import HARMFUL, UNSETTLED, skill_report, trust_score
 from .writeback import PROP_AGENT, PROP_TRUST, PROP_VERDICT
@@ -120,10 +135,14 @@ class TrustGateway:
         n_sims: int = 4000,
         clock: Callable[[], float] = time.time,
         event_store: Optional[EventStore] = None,
+        catalog_context: Optional[CatalogContext] = None,
+        thresholds: Optional[PolicyThresholds] = None,
     ):
         self.downstream = downstream
         self.store = store
         self.event_store = event_store
+        self.catalog_context = catalog_context
+        self.thresholds = thresholds or PolicyThresholds()
         self.trust_lookup = trust_lookup
         self.agent_id = agent_id
         self.policy = policy
@@ -171,27 +190,30 @@ class TrustGateway:
         self._standing_cache = (now, standing)
         return standing
 
-    def check_policy(self) -> Optional[str]:
-        """Reason to reject the mutation, or None to let it through."""
+    def policy_decision(self, name: str, args: dict[str, Any]) -> PolicyDecision:
+        """Accept/pass/hold/block a mutation from author standing and action findings.
+
+        Annotate mode never enforces (everything passes). Enforce mode grounds
+        the action against the catalog (when a context is available) and combines
+        those findings with the author's settled record.
+        """
         if self.policy != POLICY_ENFORCE:
-            return None
+            return PolicyDecision(TIER_PASS)
+        findings: list[Any] = []
+        if self.catalog_context is not None:
+            try:
+                findings = ground_action(self.agent_id, name, args, self.catalog_context)
+            except Exception as exc:  # grounding must not break the proxy
+                _log(f"grounding failed for {name}: {exc}")
         standing = self.caller_standing()
-        if standing["verdict"] == HARMFUL:
-            return (
-                f"heimdall policy: agent '{self.agent_id}' has verdict "
-                f"'{HARMFUL}' over {standing['n_settled']} settled claims; "
-                "mutations are blocked. Improve the settled record through "
-                "reviewed contributions before writing again."
-            )
-        if standing["trust"] < self.min_trust:
-            return (
-                f"heimdall policy: agent '{self.agent_id}' trust "
-                f"{standing['trust']:.1f} is below the floor "
-                f"{self.min_trust:.1f} for mutations "
-                f"({standing['n_settled']} settled claims). Reads are still "
-                "allowed; earn trust by making claims that settle correctly."
-            )
-        return None
+        return decide(
+            agent_trust=standing["trust"],
+            agent_verdict=standing["verdict"],
+            n_settled=standing["n_settled"],
+            findings=findings,
+            min_trust=self.min_trust,
+            thresholds=self.thresholds,
+        )
 
     # -- implicit claim intake -------------------------------------------------
 
@@ -313,15 +335,26 @@ class TrustGateway:
         started = self.clock()
 
         if mutation:
-            rejection = self.check_policy()
-            if rejection is not None:
-                _log(f"blocked {name} from {self.agent_id}")
+            decision = self.policy_decision(name, args)
+            if decision.tier == TIER_BLOCK:
+                _log(f"blocked {name} from {self.agent_id}: {decision.reason}")
                 self._record_event(
                     name, op, BLOCKED, args,
                     entities=extract_entity_urns(args),
-                    latency_ms=0, error=rejection,
+                    latency_ms=0, error=decision.reason,
                 )
-                raise PermissionError(rejection)
+                raise PermissionError(decision.reason)
+            if decision.tier == TIER_HOLD:
+                _log(f"held {name} from {self.agent_id}: {decision.reason}")
+                self._record_event(
+                    name, op, HELD, args,
+                    entities=extract_entity_urns(args),
+                    latency_ms=0, error=decision.reason,
+                )
+                return [types.TextContent(
+                    type="text",
+                    text=("heimdall: this write is held for review and was not "
+                          f"applied. {decision.reason}"))]
             try:
                 self.record_implicit_claim(name, args)
             except Exception as exc:  # claim intake must never drop the observation
@@ -419,6 +452,17 @@ async def serve() -> None:
     events_path = os.environ.get(
         "HEIMDALL_EVENTS", os.path.expanduser("~/heimdall-events.db")
     )
+    # catalog grounding source for in-flight policy. "world" = the demo catalog;
+    # a live DataHubCatalogContext is the production backing (same evaluators).
+    catalog_context: Optional[CatalogContext] = None
+    if os.environ.get("HEIMDALL_CATALOG", "world") == "world":
+        from .grounding import WorldCatalogContext
+        from .simulator.world import build_default_world
+        catalog_context = WorldCatalogContext(build_default_world())
+    thresholds = PolicyThresholds(
+        accept_at=float(os.environ.get("HEIMDALL_ACCEPT_AT", "70")),
+        hold_floor=float(os.environ.get("HEIMDALL_HOLD_FLOOR", "55")),
+    )
 
     params = StdioServerParameters(
         command=_server_command(),
@@ -445,6 +489,8 @@ async def serve() -> None:
                 min_trust=min_trust,
                 implicit_confidence=implicit_conf,
                 event_store=events,
+                catalog_context=catalog_context,
+                thresholds=thresholds,
             )
             gateway.set_tools(tools)
             _log(

@@ -92,7 +92,7 @@ def test_store_summary(tmp_path):
     for op, status in [(READ, OK), (READ, OK), (WRITE, OK), (WRITE, ERROR), (WRITE, BLOCKED)]:
         store.record(ObservationEvent(agent_id="a", tool="t", op=op, status=status))
     s = store.summary()["a"]
-    assert s == {"total": 5, "reads": 2, "writes": 3, "errors": 1, "blocked": 1}
+    assert s == {"total": 5, "reads": 2, "writes": 3, "errors": 1, "blocked": 1, "held": 0}
     store.close()
 
 
