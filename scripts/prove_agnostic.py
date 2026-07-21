@@ -16,6 +16,7 @@ Run on the box:  ~/fresh-e2e/v/bin/python scripts/prove_agnostic.py
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,9 +40,14 @@ def _require(name):
 
 
 def agent_is_heimdall_free() -> bool:
+    """True if the agent has no `import heimdall` / `from heimdall` statement.
+
+    Checks real import lines only, so prose in the docstring that mentions
+    heimdall does not count.
+    """
     with open(AGENT_FILE, encoding="utf-8") as fh:
         src = fh.read()
-    return "import heimdall" not in src and "from heimdall" not in src
+    return re.search(r"(?m)^\s*(?:import|from)\s+heimdall\b", src) is None
 
 
 def revert_writes(events, mcp_server) -> None:
