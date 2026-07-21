@@ -1,350 +1,213 @@
-import Link from "next/link";
-import CountUp from "@/components/landing/CountUp";
-import GatewayFlow from "@/components/landing/GatewayFlow";
-import Rail, { type RailStep } from "@/components/landing/Rail";
-import Reveal from "@/components/landing/Reveal";
-import Tape, { type TapeItem } from "@/components/landing/Tape";
-import VerdictBadge from "@/components/VerdictBadge";
-import { describeClaim, getAgents, getRecentClaims } from "@/lib/data";
+import {
+  AgentRow,
+  ActivityRow,
+  FindingRow,
+  datahubLink,
+  datasetName,
+  getActivity,
+  getAgents,
+  getFindings,
+  verdictTone,
+  WORK_KIND_LABEL,
+} from "../lib/data";
 
-export const revalidate = 60;
+export const revalidate = 30;
 
-function trustColor(trust: number): string {
-  if (trust >= 60) return "var(--skilled)";
-  if (trust >= 50) return "var(--luck)";
-  return "var(--harmful)";
+function trustColor(t: number | null) {
+  if (t == null) return "var(--muted)";
+  if (t >= 60) return "var(--good)";
+  if (t < 50) return "var(--bad)";
+  return "var(--warn)";
 }
 
-const RAIL_STEPS: RailStep[] = [
-  {
-    title: "Act",
-    body: "An agent does real catalog work through the DataHub MCP server: documents a column, names an incident root cause, forecasts a feed delivery.",
-  },
-  {
-    title: "Claim",
-    body: "The action is recorded as a falsifiable statement with stated confidence. Instrumented agents sign their own claims. Uninstrumented agents get claimed by the gateway.",
-    code: `{
-  "claim_type": "freshness_sla",
-  "entity": "raw_events",
-  "prediction": { "will_miss_sla": true, "day": 3 },
-  "confidence": 0.78,
-  "status": "open"
-}`,
-  },
-  {
-    title: "Settle",
-    body: "Ground truth arrives: assertion runs, SLA outcomes, incident resolutions, steward reviews. Each open claim is marked right or wrong. No self-grading.",
-  },
-  {
-    title: "Score",
-    body: "Brier score and calibration over the settled record, then a Monte Carlo test against the agent's own luck baseline: coin flips for forecasts, one in n for root causes, the pooled acceptance rate for documentation.",
-  },
-  {
-    title: "Verdict",
-    body: "Skilled, luck, or harmful, corrected for multiple comparisons. Trust shrinks toward 50 when the record is thin, so three lucky wins never outrank eighty settled claims.",
-  },
-];
+function ago(ts: string) {
+  const d = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (d < 90) return `${Math.max(1, Math.round(d))}s ago`;
+  if (d < 5400) return `${Math.round(d / 60)}m ago`;
+  if (d < 129600) return `${Math.round(d / 3600)}h ago`;
+  return `${Math.round(d / 86400)}d ago`;
+}
 
-export default async function Landing() {
-  const [agents, recent] = await Promise.all([getAgents(), getRecentClaims(20)]);
-  const totalClaims = agents.reduce((s, a) => s + a.n_total, 0);
-  const totalSettled = agents.reduce((s, a) => s + a.n_settled, 0);
-  const rogue = agents.find((a) => a.agent_id === "rogue-agent") ?? null;
-  const top = agents.slice(0, 5);
-
-  const tapeItems: TapeItem[] = recent.map((c) => ({
-    mark: c.correct === null ? "OPEN" : c.correct ? "RIGHT" : "WRONG",
-    cls: c.correct === null ? "open" : c.correct ? "right" : "wrong",
-    text: describeClaim(c.claim_type, c.prediction, c.entity_urn),
-    conf: c.confidence.toFixed(2),
-  }));
-
+function Leaderboard({ agents }: { agents: AgentRow[] }) {
+  const kinds = Array.from(new Set(agents.map((a) => a.work_kind)));
   return (
-    <main className="landing">
-      <div className="glow" />
-
-      <section className="hero-wrap">
-        <div>
-          <div className="kicker">built on DataHub / Apache 2.0</div>
-          <h1 className="hero-title display">
-            <span className="hero-line">
-              <span>Every action is a claim.</span>
-            </span>
-            <span className="hero-line">
-              <span>Every claim settles.</span>
-            </span>
-            <span className="hero-line accent">
-              <span>Trust is computed.</span>
-            </span>
-          </h1>
-          <p className="hero-sub">
-            Heimdall scores the AI agents working your DataHub catalog
-            against ground truth, writes the trust back into the catalog, and
-            blocks writes from agents that have not earned it.
-          </p>
-          <div className="hero-ctas">
-            <Link href="/board" className="btn primary">
-              see the live board
-            </Link>
-            <Link href="/proof" className="btn ghost">
-              open the proof
-            </Link>
+    <div className="card" id="leaderboard">
+      <div className="hd">
+        <h3>Global leaderboard</h3>
+        <span className="sub">best agent per work kind, across all public agents</span>
+      </div>
+      {kinds.map((kind) => {
+        const rows = agents
+          .filter((a) => a.work_kind === kind)
+          .sort((x, y) => (y.trust ?? 0) - (x.trust ?? 0));
+        return (
+          <div key={kind}>
+            <div className="kindhdr">{WORK_KIND_LABEL[kind] ?? kind}</div>
+            {rows.map((a) => {
+              const priv = a.visibility === "private";
+              const tone = verdictTone(a.verdict);
+              return (
+                <div className="row" key={a.agent_id + a.work_kind}>
+                  <a className="link mono" href={`/agents/${encodeURIComponent(a.agent_id)}`}>
+                    {a.agent_id}
+                  </a>
+                  {priv && <span className="access">private · request access</span>}
+                  <div className="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div className="trustbar" title="trust score">
+                      <span
+                        style={{
+                          width: `${a.trust ?? 50}%`,
+                          background: trustColor(a.trust),
+                        }}
+                      />
+                    </div>
+                    <span className="mono" style={{ width: 34, textAlign: "right" }}>
+                      {a.trust?.toFixed(0) ?? "–"}
+                    </span>
+                    <span className={`badge ${tone}`}>{a.verdict ?? "unrated"}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <div className="hero-stats">
-            <div className="hero-stat">
-              <div className="n display">
-                <CountUp value={agents.length} />
-              </div>
-              <div className="l">agents scored</div>
-            </div>
-            <div className="hero-stat">
-              <div className="n display">
-                <CountUp value={totalClaims} />
-              </div>
-              <div className="l">claims recorded</div>
-            </div>
-            <div className="hero-stat">
-              <div className="n display">
-                <CountUp value={totalSettled} />
-              </div>
-              <div className="l">settled against reality</div>
-            </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Activity({ activity }: { activity: ActivityRow[] }) {
+  return (
+    <div className="card" id="activity">
+      <div className="hd">
+        <h3>Live activity</h3>
+        <span className="sub">every agent call, observed at the gateway</span>
+      </div>
+      {activity.length === 0 && <div className="row muted">No activity yet.</div>}
+      {activity.map((e) => {
+        const ds = e.entities && e.entities[0] ? datasetName(e.entities[0]) : "";
+        return (
+          <div className="row" key={e.id}>
+            <span className={`dot ${e.status}`} />
+            <span className="mono">{e.agent_id}</span>
+            <span className={`op ${e.op}`}>{e.op}</span>
+            <span className="mono muted">{e.tool}</span>
+            {ds && <span className="mono dim">{ds}</span>}
+            <span className="right dim mono" style={{ fontSize: 12 }}>
+              {e.status === "blocked" && <span className="badge bad">blocked</span>}
+              {e.status === "held" && <span className="badge hold">held</span>}
+              {e.latency_ms != null && e.status === "ok" ? ` ${e.latency_ms}ms · ` : " "}
+              {ago(e.ts)}
+            </span>
           </div>
-        </div>
-        <Tape items={tapeItems} />
-      </section>
+        );
+      })}
+    </div>
+  );
+}
 
-      <section className="lsec">
-        <div className="lsec-label">
-          <b>01</b> the gap
-        </div>
-        <Reveal>
-          <div className="loglines">
-            <span className="ok">an agent documented ten columns in raw_orders</span>
-            <span className="ok">an agent named a root cause in one MCP call</span>
-            <span className="ok">an agent forecast tomorrow&apos;s raw_events delivery</span>
-          </div>
-        </Reveal>
-        <Reveal delay={120}>
-          <h2 className="big-statement display">
-            All of it landed in your catalog.{" "}
-            <span className="dim">None of it was verified.</span>
-          </h2>
-        </Reveal>
-        <Reveal delay={200}>
-          <p className="hero-sub">
-            Agent confidence is self-reported. Heimdall makes every action
-            falsifiable, then keeps score.
-          </p>
-        </Reveal>
-      </section>
-
-      <section className="lsec">
-        <div className="lsec-label">
-          <b>02</b> for teams running agents on DataHub
-        </div>
-        <div className="svc-grid">
-          <Reveal>
-            <div className="card svc">
-              <span className="ghost-n display">01</span>
-              <div className="idx">01 / SCORE</div>
-              <h3>Score any agent</h3>
-              <p>
-                Point the agent&apos;s MCP traffic through the trust gateway.
-                Its catalog writes become claims automatically. No SDK, no
-                changes to the agent.
-              </p>
-            </div>
-          </Reveal>
-          <Reveal delay={90}>
-            <div className="card svc">
-              <span className="ghost-n display">02</span>
-              <div className="idx">02 / GATE</div>
-              <h3>Gate the catalog</h3>
-              <p>
-                Set a trust floor per workflow. Writes from agents below the
-                floor are rejected before they touch metadata. Harmful
-                verdicts are always blocked.
-              </p>
-            </div>
-          </Reveal>
-          <Reveal delay={180}>
-            <div className="card svc">
-              <span className="ghost-n display">03</span>
-              <div className="idx">03 / WRITE BACK</div>
-              <h3>Write trust back</h3>
-              <p>
-                Verdict tags, trust properties, and a dossier per agent,
-                published into DataHub where your stewards already work.
-              </p>
-            </div>
-          </Reveal>
-          <Reveal delay={270}>
-            <div className="card svc">
-              <span className="ghost-n display">04</span>
-              <div className="idx">04 / AUDIT</div>
-              <h3>Audit in public</h3>
-              <p>
-                A live board per agent: trust, win rate, calibration, and
-                every settled claim.{" "}
-                <Link href="/board" className="svc-link">
-                  This site is it &rarr;
-                </Link>
-              </p>
-            </div>
-          </Reveal>
-        </div>
-        <Reveal delay={120}>
-          <GatewayFlow rogueTrust={rogue ? rogue.trust : null} floor={55} />
-        </Reveal>
-      </section>
-
-      <section className="lsec">
-        <div className="lsec-label">
-          <b>03</b> how a score is earned
-        </div>
-        <Rail steps={RAIL_STEPS} />
-      </section>
-
-      <section className="lsec">
-        <div className="lsec-label">
-          <b>04</b> proof, caught live
-        </div>
-        <div className="rogue">
-          <div>
-            <Reveal>
-              <h2 className="big-statement display" style={{ fontSize: "clamp(24px, 3vw, 36px)" }}>
-                A rogue agent, caught by settlement.
-              </h2>
-            </Reveal>
-            <div className="rogue-steps">
-              <Reveal>
-                <div className="rstep">
-                  <span className="rn">01</span>
-                  <p>
-                    <b>rogue-agent</b>, never instrumented, writes a column
-                    description through the gateway.
-                  </p>
-                </div>
-              </Reveal>
-              <Reveal delay={80}>
-                <div className="rstep">
-                  <span className="rn">02</span>
-                  <p>
-                    The gateway records it as an implicit claim at p=0.60.
-                    The agent never knew.
-                  </p>
-                </div>
-              </Reveal>
-              <Reveal delay={160}>
-                <div className="rstep bad">
-                  <span className="rn">03</span>
-                  <p>
-                    A steward review settles the claim <b>wrong</b>. The bad
-                    description is reverted in DataHub.
-                  </p>
-                </div>
-              </Reveal>
-              <Reveal delay={240}>
-                <div className="rstep bad">
-                  <span className="rn">04</span>
-                  <p>
-                    {rogue
-                      ? `Trust falls to ${rogue.trust.toFixed(1)}, below the floor of 55. `
-                      : "Trust falls below the floor of 55. "}
-                    Next write attempt: <b>blocked</b>.
-                  </p>
-                </div>
-              </Reveal>
-            </div>
-            {rogue && (
-              <Reveal delay={300}>
-                <Link
-                  href={`/agents/${encodeURIComponent(rogue.agent_id)}`}
-                  className="btn ghost"
-                  style={{ display: "inline-block", marginTop: 18 }}
-                >
-                  see its record
-                </Link>
-              </Reveal>
+function Findings({ findings }: { findings: FindingRow[] }) {
+  return (
+    <div className="card" id="findings">
+      <div className="hd">
+        <h3>Catalog-grounded findings</h3>
+        <span className="sub">what a generic LLM tracer cannot see</span>
+      </div>
+      {findings.length === 0 && <div className="row muted">No findings.</div>}
+      {findings.map((f) => (
+        <div className="finding" key={f.id}>
+          <div className="top">
+            <span className={`badge ${f.severity === "harmful" ? "bad" : "warn"}`}>
+              {f.severity}
+            </span>
+            <span className="mono muted">{f.check_type}</span>
+            <span className="mono">{f.agent_id}</span>
+            {f.entity_urn && (
+              <a className="right link mono" href={datahubLink(f.entity_urn)} target="_blank" rel="noreferrer">
+                {datasetName(f.entity_urn)}
+                {f.column ? `.${f.column}` : ""} ↗
+              </a>
             )}
           </div>
-          <Reveal delay={140}>
-            <div className="card">
-              <div className="mini-head">the board right now</div>
-              {top.map((a) => (
-                <Link
-                  key={a.agent_id}
-                  href={`/agents/${encodeURIComponent(a.agent_id)}`}
-                  className="mini-row"
-                >
-                  <span className="mini-name">{a.agent_id}</span>
-                  <span
-                    className="mini-trust"
-                    style={{ color: trustColor(a.trust) }}
-                  >
-                    {a.trust.toFixed(1)}
-                  </span>
-                  <VerdictBadge verdict={a.verdict} />
-                </Link>
-              ))}
-              {top.length === 0 && (
-                <div className="claim-line">
-                  <span className="claim-body">
-                    No published agents yet. Run the pipeline and publish the
-                    ledger.
-                  </span>
-                </div>
-              )}
-              <Link href="/board" className="mini-more">
-                full board &rarr;
-              </Link>
-            </div>
-          </Reveal>
+          <div className="reason">{f.reason}</div>
         </div>
-      </section>
+      ))}
+    </div>
+  );
+}
 
-      <section className="lsec">
-        <div className="lsec-label">
-          <b>05</b> run it
-        </div>
-        <Reveal>
-          <div className="card run-box">
-            <div>
-              <h2 className="big-statement display" style={{ fontSize: "clamp(24px, 3vw, 36px)" }}>
-                Run it on your catalog.
-              </h2>
-              <p className="hero-sub" style={{ marginTop: 14 }}>
-                One Python package, Apache 2.0. Works against any DataHub with
-                the MCP server enabled.
-              </p>
-              <div className="hero-ctas" style={{ marginTop: 22 }}>
-                <a
-                  href="https://github.com/cnpierrepapi/heimdall"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn primary"
-                >
-                  github.com/cnpierrepapi/heimdall
-                </a>
-              </div>
-            </div>
-            <div className="term">
-              <div>
-                <span className="p">$</span>git clone
-                https://github.com/cnpierrepapi/heimdall
-              </div>
-              <div>
-                <span className="p">$</span>pip install -e heimdall
-              </div>
-              <div>
-                <span className="p">$</span>python -m heimdall.gateway
-              </div>
-              <div className="c"># every write is now a scored claim</div>
-            </div>
+export default async function Home() {
+  const [agents, activity, findings] = await Promise.all([
+    getAgents(),
+    getActivity(),
+    getFindings(),
+  ]);
+
+  const distinctAgents = new Set(agents.map((a) => a.agent_id)).size;
+  const harmful = findings.filter((f) => f.severity === "harmful").length;
+  const stopped = activity.filter((e) => e.status === "blocked" || e.status === "held").length;
+
+  return (
+    <main>
+      <div className="wrap">
+        <section className="hero">
+          <h1>
+            Your agents are writing to your catalog.{" "}
+            <span className="grad">Heimdall watches them.</span>
+          </h1>
+          <p>
+            DataHub feeds your AI agents context. Nobody watches the agents back. Heimdall sits
+            in the agent-to-DataHub path, observes every action, grounds it in your catalog,
+            scores each agent&apos;s reliability, and blocks the bad writes before they land.
+          </p>
+          <div className="pills">
+            <span className="pill">observe</span>
+            <span className="pill">ground in catalog context</span>
+            <span className="pill">score skill vs luck</span>
+            <span className="pill">govern in flight</span>
+            <span className="pill">write trust back</span>
           </div>
-        </Reveal>
-      </section>
+        </section>
+
+        <div className="statrow">
+          <div className="stat">
+            <div className="n">{distinctAgents}</div>
+            <div className="l">agents observed</div>
+          </div>
+          <div className="stat">
+            <div className="n">{activity.length}</div>
+            <div className="l">actions traced</div>
+          </div>
+          <div className="stat">
+            <div className="n" style={{ color: "var(--bad)" }}>{harmful}</div>
+            <div className="l">harmful findings</div>
+          </div>
+          <div className="stat">
+            <div className="n" style={{ color: "var(--hold)" }}>{stopped}</div>
+            <div className="l">writes stopped in flight</div>
+          </div>
+        </div>
+
+        <div className="grid2">
+          <Activity activity={activity} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <Leaderboard agents={agents} />
+          </div>
+        </div>
+
+        <div className="section">
+          <Findings findings={findings} />
+        </div>
+
+        <footer>
+          Heimdall · agent observability &amp; trust control plane for DataHub · showcase catalog
+          <span className="dim"> lineworld</span>. Public data, read only. Live catalog at{" "}
+          <a className="link" href="https://datahub.onenept.com" target="_blank" rel="noreferrer">
+            datahub.onenept.com
+          </a>
+          .
+        </footer>
+      </div>
     </main>
   );
 }

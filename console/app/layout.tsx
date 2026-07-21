@@ -1,63 +1,32 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
-const display = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-  variable: "--font-display",
-  display: "swap",
-});
-
 export const metadata: Metadata = {
-  title: "heimdall | computed trust for AI data agents",
+  title: "Heimdall — Agent Observability & Trust for DataHub",
   description:
-    "Every agent claim is settled against reality. Brier scores, calibration, and skill-vs-luck verdicts for the agents working your DataHub catalog.",
+    "Heimdall watches every AI agent acting on your DataHub catalog: it observes each action, grounds it in catalog context, scores agent reliability, and governs writes in flight.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={display.variable}>
+    <html lang="en">
       <body>
-        <div className="shell">
+        <div className="wrap">
           <header className="topbar">
-            <Link href="/" className="brand">
-              <b>heimdall</b> / trust ledger
-            </Link>
-            <nav className="topnav">
-              <Link href="/board">Live board</Link>
-              <Link href="/registry">Registry</Link>
-              <Link href="/proof">Proof</Link>
-              <Link href="/methodology">Methodology</Link>
-              <a
-                href="https://github.com/cnpierrepapi/heimdall"
-                target="_blank"
-                rel="noreferrer"
-              >
-                GitHub
+            <a className="brand" href="/">
+              <span className="eye" /> heimdall
+            </a>
+            <nav>
+              <a href="/#leaderboard">Leaderboard</a>
+              <a href="/#activity">Activity</a>
+              <a href="/#findings">Findings</a>
+              <a href="https://datahub.onenept.com" target="_blank" rel="noreferrer">
+                DataHub
               </a>
             </nav>
           </header>
-          {children}
-          <footer className="footer">
-            <span>
-              heimdall: a trust ledger for AI data agents, built on DataHub.
-            </span>
-            <span>
-              Apache 2.0 |{" "}
-              <a
-                href="https://github.com/cnpierrepapi/heimdall"
-                target="_blank"
-                rel="noreferrer"
-              >
-                cnpierrepapi/heimdall
-              </a>
-            </span>
-          </footer>
         </div>
+        {children}
       </body>
     </html>
   );
