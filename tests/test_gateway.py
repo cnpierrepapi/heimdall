@@ -346,10 +346,10 @@ def test_enforce_blocks_catalog_violating_write_in_flight(tmp_path):
 def test_enforce_holds_low_quality_write(tmp_path):
     downstream = FakeDownstream(FakeResult('{"success": true}'))
     gateway, events = gw_enforce(tmp_path, downstream)
-    out = asyncio.run(gateway.handle("update_description", {
-        "entity_urn": ORDERS, "column_path": "order_total_usd",
-        "description": "a column", "operation": "replace"}))
-    assert "held for review" in out[0].text
+    with pytest.raises(PermissionError, match="held for review"):
+        asyncio.run(gateway.handle("update_description", {
+            "entity_urn": ORDERS, "column_path": "order_total_usd",
+            "description": "a column", "operation": "replace"}))
     assert downstream.calls == []            # not applied
     assert events.events()[-1].status == HELD
 

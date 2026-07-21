@@ -351,10 +351,10 @@ class TrustGateway:
                     entities=extract_entity_urns(args),
                     latency_ms=0, error=decision.reason,
                 )
-                return [types.TextContent(
-                    type="text",
-                    text=("heimdall: this write is held for review and was not "
-                          f"applied. {decision.reason}"))]
+                # surfaced as an error so the agent knows the write did not take
+                # effect; recorded distinctly as "held" (a steward can release it)
+                raise PermissionError(
+                    "heimdall: held for review and not applied. " + decision.reason)
             try:
                 self.record_implicit_claim(name, args)
             except Exception as exc:  # claim intake must never drop the observation

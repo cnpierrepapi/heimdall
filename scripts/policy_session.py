@@ -73,11 +73,14 @@ def main() -> int:
             print(f"clean write unexpectedly failed: {str(exc)[:80]}")
 
         # 2. a filler description: should be held, not applied
-        out = mcp.call("update_description", {
-            "entity_urn": orders, "column_path": "order_total_usd",
-            "description": "a column", "operation": "replace"})
-        held = isinstance(out, str) and "held for review" in out
-        print(f"filler write: {'HELD (not applied)' if held else 'NOT HELD: ' + str(out)[:80]}")
+        try:
+            mcp.call("update_description", {
+                "entity_urn": orders, "column_path": "order_total_usd",
+                "description": "a column", "operation": "replace"})
+            print("filler write: NOT HELD (unexpected)")
+        except RuntimeError as exc:
+            held = "held for review" in str(exc)
+            print(f"filler write: {'HELD (not applied)' if held else 'unexpected: ' + str(exc)[:80]}")
 
         # 3. a glossary-contradicting description: should be blocked, not applied
         try:
