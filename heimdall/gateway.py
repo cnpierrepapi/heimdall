@@ -22,7 +22,8 @@ give it:
 Configuration is by environment, one gateway process per connected agent:
 
   HEIMDALL_AGENT_ID            identity of the connected agent
-  LEDGER_DB                      path to the ledger database
+  LEDGER_DB                      path to the claim ledger database
+  HEIMDALL_EVENTS              path to the observation event store
   HEIMDALL_POLICY              annotate (default) or enforce
   HEIMDALL_MIN_TRUST           trust floor for mutations in enforce mode
   HEIMDALL_IMPLICIT_CONFIDENCE prior confidence for implicit claims (0.6)
@@ -43,6 +44,18 @@ import mcp.types as types
 
 from .agents.common import extract_dataset_urns
 from .claims import ENRICHMENT, Claim, ClaimStore
+from .observability import (
+    BLOCKED,
+    ERROR,
+    OK,
+    READ,
+    WRITE,
+    EventStore,
+    ObservationEvent,
+    extract_entity_urns,
+    sanitize_args,
+    summarize_result,
+)
 from .skill import HARMFUL, UNSETTLED, skill_report, trust_score
 from .writeback import PROP_AGENT, PROP_TRUST, PROP_VERDICT
 
@@ -75,6 +88,21 @@ def _dataset_display(urn: str) -> str:
         return urn
 
 
+def _merge_urns(*groups: list[str], limit: int = 32) -> list[str]:
+    """Union of urn lists, dedup in order, capped."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for group in groups:
+        for urn in group:
+            if urn in seen:
+                continue
+            seen.add(urn)
+            out.append(urn)
+            if len(out) >= limit:
+                return out
+    return out
+
+
 class TrustGateway:
     """Pure gateway logic; transport wiring lives in serve()."""
 
@@ -91,9 +119,11 @@ class TrustGateway:
         props_ttl: float = 300.0,
         n_sims: int = 4000,
         clock: Callable[[], float] = time.time,
+        event_store: Optional[EventStore] = None,
     ):
         self.downstream = downstream
         self.store = store
+        self.event_store = event_store
         self.trust_lookup = trust_lookup
         self.agent_id = agent_id
         self.policy = policy
@@ -238,6 +268,40 @@ class TrustGateway:
             return None
         return "--- heimdall trust context ---\n" + "\n".join(lines)
 
+    # -- observation capture -----------------------------------------------------
+
+    def _record_event(
+        self,
+        name: str,
+        op: str,
+        status: str,
+        args: dict[str, Any],
+        entities: list[str],
+        latency_ms: Optional[int],
+        result_summary: str = "",
+        error: Optional[str] = None,
+    ) -> None:
+        """Persist one observation. Capture must never break the proxied call."""
+        if self.event_store is None:
+            return
+        try:
+            self.event_store.record(
+                ObservationEvent(
+                    agent_id=self.agent_id,
+                    tool=name,
+                    op=op,
+                    status=status,
+                    args=sanitize_args(args),
+                    entities=entities,
+                    latency_ms=latency_ms,
+                    result_summary=result_summary,
+                    error=error,
+                    ts=self.clock(),
+                )
+            )
+        except Exception as exc:  # observability is best-effort, not load-bearing
+            _log(f"event capture failed for {name}: {exc}")
+
     # -- the proxy call ----------------------------------------------------------
 
     async def handle(
@@ -245,19 +309,53 @@ class TrustGateway:
     ) -> list[Any]:
         args = arguments or {}
         mutation = self.is_mutation(name)
+        op = WRITE if mutation else READ
+        started = self.clock()
+
         if mutation:
             rejection = self.check_policy()
             if rejection is not None:
                 _log(f"blocked {name} from {self.agent_id}")
+                self._record_event(
+                    name, op, BLOCKED, args,
+                    entities=extract_entity_urns(args),
+                    latency_ms=0, error=rejection,
+                )
                 raise PermissionError(rejection)
             self.record_implicit_claim(name, args)
 
-        result = await self.downstream.call_tool(name, args)
+        try:
+            result = await self.downstream.call_tool(name, args)
+        except Exception as exc:
+            self._record_event(
+                name, op, ERROR, args,
+                entities=extract_entity_urns(args),
+                latency_ms=int((self.clock() - started) * 1000),
+                error=str(exc)[:500],
+            )
+            raise
+
         text = "\n".join(
             b.text for b in result.content if getattr(b, "text", None)
         )
+        latency_ms = int((self.clock() - started) * 1000)
+        # entities touched = what the call aimed at (args) plus what it saw (result)
+        entities = _merge_urns(extract_entity_urns(args), extract_entity_urns(text))
+
         if result.isError:
+            self._record_event(
+                name, op, ERROR, args, entities=entities,
+                latency_ms=latency_ms,
+                result_summary=summarize_result(text),
+                error=text[:500],
+            )
             raise RuntimeError(text[:1000] or f"{name} failed downstream")
+
+        self._record_event(
+            name, op, OK, args, entities=entities,
+            latency_ms=latency_ms,
+            result_summary=summarize_result(text),
+        )
 
         content = list(result.content)
         if not mutation:
@@ -315,6 +413,9 @@ async def serve() -> None:
     policy = os.environ.get("HEIMDALL_POLICY", POLICY_ANNOTATE)
     min_trust = float(os.environ.get("HEIMDALL_MIN_TRUST", "0"))
     implicit_conf = float(os.environ.get("HEIMDALL_IMPLICIT_CONFIDENCE", "0.6"))
+    events_path = os.environ.get(
+        "HEIMDALL_EVENTS", os.path.expanduser("~/heimdall-events.db")
+    )
 
     params = StdioServerParameters(
         command=_server_command(),
@@ -330,6 +431,7 @@ async def serve() -> None:
             tools = (await downstream.list_tools()).tools
 
             store = ClaimStore(db_path)
+            events = EventStore(events_path)
             graph = DataHubGraph(DatahubClientConfig(server=gms_url))
             gateway = TrustGateway(
                 downstream=downstream,
@@ -339,11 +441,13 @@ async def serve() -> None:
                 policy=policy,
                 min_trust=min_trust,
                 implicit_confidence=implicit_conf,
+                event_store=events,
             )
             gateway.set_tools(tools)
             _log(
                 f"serving {len(tools)} tools for agent '{agent_id}' "
-                f"(policy={policy}, min_trust={min_trust})"
+                f"(policy={policy}, min_trust={min_trust}); "
+                f"observing to {events_path}"
             )
 
             server = Server("heimdall-gateway")

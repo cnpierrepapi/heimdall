@@ -9,6 +9,7 @@ import pytest
 
 from heimdall.claims import ClaimStore
 from heimdall.gateway import POLICY_ENFORCE, TrustGateway
+from heimdall.observability import BLOCKED, ERROR, OK, READ, WRITE, EventStore
 from heimdall.skill import HARMFUL
 
 URN_A = "urn:li:dataset:(urn:li:dataPlatform:postgres,db.a,PROD)"
@@ -215,3 +216,95 @@ def test_downstream_error_propagates(tmp_path):
     gateway, _ = gw(tmp_path, downstream)
     with pytest.raises(RuntimeError, match="boom"):
         asyncio.run(gateway.handle("search", {}))
+
+
+# -- A1 observation capture ---------------------------------------------------
+
+
+class RaisingDownstream:
+    async def call_tool(self, name, args):
+        raise ConnectionError("gms unreachable")
+
+
+def gw_ev(tmp_path, downstream, policy="annotate", min_trust=0.0, agent_id="agent-x"):
+    store = ClaimStore(str(tmp_path / "ledger.db"))
+    events = EventStore(str(tmp_path / "events.db"))
+    gateway = TrustGateway(
+        downstream=downstream,
+        store=store,
+        trust_lookup=lambda urn: None,
+        agent_id=agent_id,
+        policy=policy,
+        min_trust=min_trust,
+        event_store=events,
+    )
+    return gateway, events
+
+
+def test_read_records_ok_event_with_result_entities(tmp_path):
+    downstream = FakeDownstream(FakeResult(f'{{"results": ["{URN_A}"]}}'))
+    gateway, events = gw_ev(tmp_path, downstream)
+    asyncio.run(gateway.handle("search", {"query": "orders"}))
+    evs = events.events()
+    assert len(evs) == 1
+    ev = evs[0]
+    assert ev.tool == "search" and ev.op == READ and ev.status == OK
+    assert URN_A in ev.entities
+    assert ev.args == {"query": "orders"}
+    assert ev.latency_ms is not None
+
+
+def test_write_records_ok_event_with_arg_entities(tmp_path):
+    downstream = FakeDownstream(FakeResult('{"success": true}'))
+    gateway, events = gw_ev(tmp_path, downstream, agent_id="third-party")
+    asyncio.run(gateway.handle(
+        "update_description",
+        {"entity_urn": URN_A, "description": "Total in USD."},
+    ))
+    ev = events.events()[0]
+    assert ev.op == WRITE and ev.status == OK
+    assert URN_A in ev.entities
+    assert ev.agent_id == "third-party"
+
+
+def test_blocked_mutation_is_still_observed(tmp_path):
+    downstream = FakeDownstream(FakeResult("{}"))
+    gateway, events = gw_ev(tmp_path, downstream, policy=POLICY_ENFORCE, min_trust=55.0)
+    with pytest.raises(PermissionError):
+        asyncio.run(gateway.handle(
+            "update_description", {"entity_urn": URN_A, "description": "x"}
+        ))
+    evs = events.events()
+    assert len(evs) == 1
+    assert evs[0].status == BLOCKED and evs[0].op == WRITE
+    assert evs[0].error and "heimdall policy" in evs[0].error
+    # downstream never called
+    assert downstream.calls == []
+
+
+def test_downstream_iserror_records_error_event(tmp_path):
+    downstream = FakeDownstream(FakeResult("boom", is_error=True))
+    gateway, events = gw_ev(tmp_path, downstream)
+    with pytest.raises(RuntimeError, match="boom"):
+        asyncio.run(gateway.handle("search", {}))
+    ev = events.events()[0]
+    assert ev.status == ERROR and ev.op == READ
+    assert "boom" in ev.error
+
+
+def test_downstream_exception_records_error_event(tmp_path):
+    gateway, events = gw_ev(tmp_path, RaisingDownstream())
+    with pytest.raises(ConnectionError):
+        asyncio.run(gateway.handle("get_entities", {"urns": [URN_A]}))
+    ev = events.events()[0]
+    assert ev.status == ERROR
+    assert "gms unreachable" in ev.error
+    assert URN_A in ev.entities  # captured from args even though the call failed
+
+
+def test_capture_is_noop_without_event_store(tmp_path):
+    # a gateway built without an event store still proxies fine
+    downstream = FakeDownstream(FakeResult(URN_A))
+    gateway, _ = gw(tmp_path, downstream)
+    content = asyncio.run(gateway.handle("search", {}))
+    assert content  # no crash, normal return
