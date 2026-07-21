@@ -135,6 +135,15 @@ def test_correct_pii_not_flagged():
     assert f == []
 
 
+def test_removing_a_tag_is_not_graded():
+    # removing a (wrong) PII tag from a non-PII column is a fix, not a violation
+    f = ground_event(ev("remove_tags", {
+        "entity_urns": [ORDERS], "column_paths": ["customer_id"],
+        "tag_urns": ["urn:li:tag:pii-email"],
+    }), CTX)
+    assert f == []
+
+
 # -- governance ---------------------------------------------------------------
 
 

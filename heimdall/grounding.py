@@ -323,9 +323,16 @@ def check_governance(action: Action, ctx: CatalogContext, dataset: str) -> list[
     return out
 
 
+def _is_removal(action: Action) -> bool:
+    """Removing metadata is not asserting a catalog fact, so it is not graded."""
+    return action.tool.startswith("remove_") or action.operation == "remove"
+
+
 def ground_event(event: ObservationEvent, ctx: CatalogContext) -> list[Finding]:
     """All catalog-grounded findings for one observed action. Empty = clean."""
     action = parse_action(event)
+    if _is_removal(action):
+        return []
     dataset = _dataset_or_none(action, ctx)
     if dataset is None:
         return []  # not an entity we can ground against
