@@ -124,17 +124,23 @@ def define_trust_properties(emitter: Any) -> list[str]:
             )
         )
         is_verdict = urn == PROP_VERDICT
-        emitter.emit(
-            MetadataChangeProposalWrapper(
-                entityUrn=urn,
-                aspect=StructuredPropertySettingsClass(
-                    isHidden=False,
-                    showInAssetSummary=True,
-                    showAsAssetBadge=is_verdict,
-                    showInSearchFilters=is_verdict,
-                ),
+        try:
+            # the settings aspect updates search facets, which touches the search
+            # index; a degraded index must not abort the definition (the property
+            # still exists and is assignable, just less surfaced in the UI)
+            emitter.emit(
+                MetadataChangeProposalWrapper(
+                    entityUrn=urn,
+                    aspect=StructuredPropertySettingsClass(
+                        isHidden=False,
+                        showInAssetSummary=True,
+                        showAsAssetBadge=is_verdict,
+                        showInSearchFilters=is_verdict,
+                    ),
+                )
             )
-        )
+        except Exception:
+            pass
         defined.append(urn)
     return defined
 
