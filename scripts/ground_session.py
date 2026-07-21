@@ -111,7 +111,7 @@ def main() -> int:
         }, "write a filler description")
         # PII false-positive: customer_id is a deliberate non-PII trap.
         try_call(mcp, "add_tags", {
-            "entity_urns": [orders], "column_path": "customer_id",
+            "entity_urns": [orders], "column_paths": ["customer_id"],
             "tag_urns": ["urn:li:tag:pii-email"],
         }, "flag a non-PII column as PII")
 
@@ -127,7 +127,7 @@ def main() -> int:
                 pass
         try:
             mcp.call("remove_tags", {
-                "entity_urns": [orders], "column_path": "customer_id",
+                "entity_urns": [orders], "column_paths": ["customer_id"],
                 "tag_urns": ["urn:li:tag:pii-email"],
             })
         except RuntimeError:
