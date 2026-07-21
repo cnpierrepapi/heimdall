@@ -206,12 +206,22 @@ def agent_profile(store: ClaimStore, agent_id: str, **kwargs: Any) -> dict[str, 
     return trust_report(store, **kwargs).get(agent_id, {})
 
 
-def hd_agents_rows(store: ClaimStore, **kwargs: Any) -> list[dict[str, Any]]:
-    """Rows for the public hd_agents table (one per agent x work_kind)."""
+def hd_agents_rows(
+    store: ClaimStore,
+    registry: Optional[dict[str, dict[str, Any]]] = None,
+    **kwargs: Any,
+) -> list[dict[str, Any]]:
+    """Rows for the hd_agents table (one per agent x work_kind).
+
+    registry optionally maps agent_id -> {"visibility": "public"|"private",
+    "owner": <org>}; agents default to public with no owner.
+    """
+    registry = registry or {}
     report = skill_report(store, **kwargs)
     rows = []
     for composite, rec in report.items():
         agent, kind = split_id(composite)
+        meta = registry.get(agent, {})
         rows.append({
             "agent_id": agent,
             "work_kind": kind,
@@ -220,6 +230,8 @@ def hd_agents_rows(store: ClaimStore, **kwargs: Any) -> list[dict[str, Any]]:
             "n_settled": rec["n_settled"],
             "brier": rec.get("brier_mean"),
             "win_rate": rec.get("win_rate"),
+            "visibility": meta.get("visibility", "public"),
+            "owner": meta.get("owner"),
         })
     return rows
 
