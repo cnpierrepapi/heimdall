@@ -9,7 +9,10 @@ from heimdall.simulator.steward import KIND_COLUMN_DOC, KIND_OWNER, KIND_PII
 from heimdall.simulator.world import build_default_world
 from heimdall.skill import HARMFUL, SKILLED
 from heimdall.trust import (
+    agent_profile,
+    best_agent_per_kind,
     graded_targets,
+    hd_agents_rows,
     leaderboard,
     settle_observations,
     trust_report,
@@ -137,3 +140,56 @@ def test_leaderboard_orders_by_trust(tmp_path):
     settle_observations(events, CTX, store)
     board = leaderboard(store, KIND_COLUMN_DOC)
     assert [r["agent_id"] for r in board] == ["good-agent", "rogue-agent"]
+
+
+def _agent_events(agent, n_correct):
+    """n_correct correct descriptions then filler for the rest of GOLD_COLS."""
+    out = []
+    for i, (urn, col, desc) in enumerate(GOLD_COLS):
+        text = desc if i < n_correct else "a column here"
+        out.append(ev("update_description",
+                      {"entity_urn": urn, "column_path": col,
+                       "description": text, "operation": "replace"}, agent=agent))
+    return out
+
+
+def _ranked_store(tmp_path):
+    store = ClaimStore(str(tmp_path / "l.db"))
+    events = (_agent_events("expert-doc", 5)
+              + _agent_events("mid-doc", 3)
+              + _agent_events("rogue-doc", 0))
+    settle_observations(events, CTX, store)
+    return store
+
+
+def test_best_agent_per_kind_picks_top_trust(tmp_path):
+    store = _ranked_store(tmp_path)
+    best = best_agent_per_kind(store)
+    # selection is by earned trust; expert has the best record for this kind
+    assert best[KIND_COLUMN_DOC]["agent_id"] == "expert-doc"
+    assert best[KIND_COLUMN_DOC]["verdict"] != HARMFUL
+
+
+def test_full_ranking_order(tmp_path):
+    store = _ranked_store(tmp_path)
+    board = leaderboard(store, KIND_COLUMN_DOC)
+    assert [r["agent_id"] for r in board] == ["expert-doc", "mid-doc", "rogue-doc"]
+
+
+def test_hd_agents_rows_shape(tmp_path):
+    store = _ranked_store(tmp_path)
+    rows = hd_agents_rows(store)
+    assert {r["agent_id"] for r in rows} == {"expert-doc", "mid-doc", "rogue-doc"}
+    assert all(r["work_kind"] == KIND_COLUMN_DOC for r in rows)
+    assert all({"trust", "verdict", "n_settled"} <= set(r) for r in rows)
+
+
+def test_agent_profile_spans_kinds(tmp_path):
+    store = ClaimStore(str(tmp_path / "l.db"))
+    events = [good_write(*c) for c in GOLD_COLS]  # column_doc
+    events.append(ev("add_owners",
+                     {"entity_urns": [ORDERS], "owner_urns": ["urn:li:corpGroup:data-platform"]},
+                     agent="good-agent"))  # owner, correct
+    settle_observations(events, CTX, store)
+    profile = agent_profile(store, "good-agent")
+    assert KIND_COLUMN_DOC in profile

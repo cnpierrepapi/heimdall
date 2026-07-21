@@ -183,6 +183,47 @@ def leaderboard(store: ClaimStore, work_kind: str, **kwargs: Any) -> list[dict[s
     return rows
 
 
+def best_agent_per_kind(store: ClaimStore, **kwargs: Any) -> dict[str, dict[str, Any]]:
+    """The global leaderboard by work_kind: the top-trust agent for each kind.
+
+    This is the SELECT answer: point a job of a given kind at the agent that
+    has earned the most trust doing exactly that kind of work.
+    """
+    report = skill_report(store, **kwargs)
+    by_kind: dict[str, dict[str, Any]] = {}
+    for composite, rec in report.items():
+        agent, kind = split_id(composite)
+        candidate = {"agent_id": agent, "trust": rec["trust"],
+                     "verdict": rec["verdict"], "n_settled": rec["n_settled"]}
+        cur = by_kind.get(kind)
+        if cur is None or candidate["trust"] > cur["trust"]:
+            by_kind[kind] = candidate
+    return by_kind
+
+
+def agent_profile(store: ClaimStore, agent_id: str, **kwargs: Any) -> dict[str, dict[str, Any]]:
+    """One agent's trust and verdict across every work_kind it has done."""
+    return trust_report(store, **kwargs).get(agent_id, {})
+
+
+def hd_agents_rows(store: ClaimStore, **kwargs: Any) -> list[dict[str, Any]]:
+    """Rows for the public hd_agents table (one per agent x work_kind)."""
+    report = skill_report(store, **kwargs)
+    rows = []
+    for composite, rec in report.items():
+        agent, kind = split_id(composite)
+        rows.append({
+            "agent_id": agent,
+            "work_kind": kind,
+            "trust": rec["trust"],
+            "verdict": rec["verdict"],
+            "n_settled": rec["n_settled"],
+            "brier": rec.get("brier_mean"),
+            "win_rate": rec.get("win_rate"),
+        })
+    return rows
+
+
 def score_events(
     events: list[ObservationEvent], ctx: CatalogContext, db_path: str, **kwargs: Any
 ) -> tuple[dict[str, int], dict[str, dict[str, dict[str, Any]]]]:
