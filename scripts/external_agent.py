@@ -37,8 +37,10 @@ SYSTEM = (
     "JSON object per turn and nothing else:\n"
     '  {"tool": "<name>", "args": { ... }}  to call a tool, or\n'
     '  {"done": true}                         when the task is complete.\n'
-    "Use the tool argument names exactly as given in the schemas. Prefer "
-    "writing descriptions, tags, and terms where the catalog lacks them."
+    "Use the tool argument names exactly as given in the schemas. The task asks "
+    "you to WRITE metadata: do not report done until you have actually called "
+    "the write tools (descriptions and PII tags). If a read tool fails, do not "
+    "give up: proceed to the writes the task requires."
 )
 
 
