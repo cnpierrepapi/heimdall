@@ -322,7 +322,10 @@ class TrustGateway:
                     latency_ms=0, error=rejection,
                 )
                 raise PermissionError(rejection)
-            self.record_implicit_claim(name, args)
+            try:
+                self.record_implicit_claim(name, args)
+            except Exception as exc:  # claim intake must never drop the observation
+                _log(f"implicit claim intake failed for {name}: {exc}")
 
         try:
             result = await self.downstream.call_tool(name, args)
