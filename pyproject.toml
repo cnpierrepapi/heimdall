@@ -1,0 +1,23 @@
+[project]
+name = "heimdall"
+version = "0.1.0"
+description = "DataHub agent observability and trust control plane: watch every agent interaction live, ground it in catalog context, score reliability, and enforce governance policy"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.7",
+    "httpx>=0.27",
+    "acryl-datahub>=1.0",
+    "mcp>=1.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["heimdall*"]

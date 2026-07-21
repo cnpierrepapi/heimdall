@@ -1,0 +1,372 @@
+"""Trust gateway: an MCP server that fronts the DataHub MCP server.
+
+Point any MCP client at this process instead of mcp-server-datahub and it
+gets the identical tool surface, plus three things the raw server cannot
+give it:
+
+  context   - every read that returns datasets heimdall has stamped gets a
+              trust block appended: who authored the metadata, their trust
+              score, their skill-vs-luck verdict, and warnings where the
+              author's record is poor. Trust is read live from the
+              structured properties the writeback layer planted in DataHub,
+              not from any local state.
+  intake    - every mutation is recorded in the ledger as an implicit claim
+              by the connected agent before it is forwarded. Uninstrumented
+              third-party agents therefore accumulate a settled record and a
+              trust score just by working through the gateway.
+  policy    - in enforce mode, mutations from agents whose settled record is
+              below the trust floor (or whose verdict is "worse than
+              chance") are rejected with an explanation instead of reaching
+              the catalog.
+
+Configuration is by environment, one gateway process per connected agent:
+
+  HEIMDALL_AGENT_ID            identity of the connected agent
+  LEDGER_DB                      path to the ledger database
+  HEIMDALL_POLICY              annotate (default) or enforce
+  HEIMDALL_MIN_TRUST           trust floor for mutations in enforce mode
+  HEIMDALL_IMPLICIT_CONFIDENCE prior confidence for implicit claims (0.6)
+  DATAHUB_GMS_URL                DataHub GMS endpoint
+  MCP_SERVER_DATAHUB             path to the downstream mcp-server-datahub
+
+Run:  python -m heimdall.gateway
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import time
+from typing import Any, Callable, Optional
+
+import mcp.types as types
+
+from .agents.common import extract_dataset_urns
+from .claims import ENRICHMENT, Claim, ClaimStore
+from .skill import HARMFUL, UNSETTLED, skill_report, trust_score
+from .writeback import PROP_AGENT, PROP_TRUST, PROP_VERDICT
+
+POLICY_ANNOTATE = "annotate"
+POLICY_ENFORCE = "enforce"
+
+NEUTRAL_TRUST = 50.0  # an agent with no settled record sits at the prior
+
+_MUTATION_PREFIXES = (
+    "add_",
+    "update_",
+    "save_",
+    "set_",
+    "remove_",
+    "create_",
+    "delete_",
+    "sync_",
+)
+
+
+def _log(message: str) -> None:
+    # stdout carries the MCP protocol; diagnostics must go to stderr
+    print(f"[heimdall-gateway] {message}", file=sys.stderr, flush=True)
+
+
+def _dataset_display(urn: str) -> str:
+    try:
+        return urn.split(",")[1]
+    except IndexError:
+        return urn
+
+
+class TrustGateway:
+    """Pure gateway logic; transport wiring lives in serve()."""
+
+    def __init__(
+        self,
+        downstream: Any,
+        store: ClaimStore,
+        trust_lookup: Callable[[str], Optional[dict[str, Any]]],
+        agent_id: str,
+        policy: str = POLICY_ANNOTATE,
+        min_trust: float = 0.0,
+        implicit_confidence: float = 0.6,
+        standing_ttl: float = 60.0,
+        props_ttl: float = 300.0,
+        n_sims: int = 4000,
+        clock: Callable[[], float] = time.time,
+    ):
+        self.downstream = downstream
+        self.store = store
+        self.trust_lookup = trust_lookup
+        self.agent_id = agent_id
+        self.policy = policy
+        self.min_trust = min_trust
+        self.implicit_confidence = implicit_confidence
+        self.standing_ttl = standing_ttl
+        self.props_ttl = props_ttl
+        self.n_sims = n_sims
+        self.clock = clock
+        self._tools: dict[str, types.Tool] = {}
+        self._props_cache: dict[str, tuple[float, Optional[dict[str, Any]]]] = {}
+        self._standing_cache: Optional[tuple[float, dict[str, Any]]] = None
+
+    def set_tools(self, tools: list[types.Tool]) -> None:
+        self._tools = {t.name: t for t in tools}
+
+    # -- classification ------------------------------------------------------
+
+    def is_mutation(self, name: str) -> bool:
+        tool = self._tools.get(name)
+        hint = getattr(getattr(tool, "annotations", None), "readOnlyHint", None)
+        if hint is not None:
+            return not hint
+        return name.startswith(_MUTATION_PREFIXES)
+
+    # -- caller standing and policy ------------------------------------------
+
+    def caller_standing(self) -> dict[str, Any]:
+        """The connected agent's current record, from the ledger, cached."""
+        now = self.clock()
+        if self._standing_cache and now - self._standing_cache[0] < self.standing_ttl:
+            return self._standing_cache[1]
+
+        settled = self.store.claims(agent_id=self.agent_id, settled=True)
+        if settled:
+            report = skill_report(self.store, n_sims=self.n_sims)
+            rec = report.get(self.agent_id, {})
+            standing = {
+                "trust": rec.get("trust", trust_score(settled)),
+                "verdict": rec.get("verdict", UNSETTLED),
+                "n_settled": len(settled),
+            }
+        else:
+            standing = {"trust": NEUTRAL_TRUST, "verdict": UNSETTLED, "n_settled": 0}
+        self._standing_cache = (now, standing)
+        return standing
+
+    def check_policy(self) -> Optional[str]:
+        """Reason to reject the mutation, or None to let it through."""
+        if self.policy != POLICY_ENFORCE:
+            return None
+        standing = self.caller_standing()
+        if standing["verdict"] == HARMFUL:
+            return (
+                f"heimdall policy: agent '{self.agent_id}' has verdict "
+                f"'{HARMFUL}' over {standing['n_settled']} settled claims; "
+                "mutations are blocked. Improve the settled record through "
+                "reviewed contributions before writing again."
+            )
+        if standing["trust"] < self.min_trust:
+            return (
+                f"heimdall policy: agent '{self.agent_id}' trust "
+                f"{standing['trust']:.1f} is below the floor "
+                f"{self.min_trust:.1f} for mutations "
+                f"({standing['n_settled']} settled claims). Reads are still "
+                "allowed; earn trust by making claims that settle correctly."
+            )
+        return None
+
+    # -- implicit claim intake -------------------------------------------------
+
+    def record_implicit_claim(self, name: str, args: dict[str, Any]) -> Optional[Claim]:
+        """Turn an uninstrumented write into a ledger claim where settleable.
+
+        update_description maps onto the enrichment claim type and settles on
+        steward review exactly like an instrumented proposal. Other mutations
+        are forwarded but not claimed: inventing claim types with no
+        settlement path would inflate records without ever scoring them.
+        """
+        if name != "update_description":
+            return None
+        description = args.get("description")
+        entity_urn = args.get("entity_urn")
+        if not description or not entity_urn or args.get("operation") == "remove":
+            return None
+        claim = Claim(
+            agent_id=self.agent_id,
+            model_id="uninstrumented",
+            claim_type=ENRICHMENT,
+            entity_urn=entity_urn,
+            prediction={
+                "column": args.get("column_path"),
+                "description": str(description)[:500],
+                "implicit": True,
+                "tool": name,
+            },
+            confidence=self.implicit_confidence,
+            evidence=["gateway-intake"],
+            created_ts=self.clock(),
+        )
+        recorded = self.store.record(claim)
+        _log(
+            f"implicit claim {recorded.claim_id[:8]} recorded for "
+            f"{self.agent_id} on {_dataset_display(entity_urn)}"
+        )
+        return recorded
+
+    # -- trust annotation -------------------------------------------------------
+
+    def _stamped(self, urn: str) -> Optional[dict[str, Any]]:
+        now = self.clock()
+        hit = self._props_cache.get(urn)
+        if hit and now - hit[0] < self.props_ttl:
+            return hit[1]
+        try:
+            info = self.trust_lookup(urn)
+        except Exception as exc:  # a GMS hiccup must not break reads
+            _log(f"trust lookup failed for {urn}: {exc}")
+            info = None
+        self._props_cache[urn] = (now, info)
+        return info
+
+    def trust_context(self, text: str, max_urns: int = 8) -> Optional[str]:
+        lines: list[str] = []
+        for urn in extract_dataset_urns(text)[:max_urns]:
+            info = self._stamped(urn)
+            if not info or not info.get("agent"):
+                continue
+            trust = info.get("trust")
+            trust_txt = f"{float(trust):.1f}/100" if trust is not None else "n/a"
+            verdict = info.get("verdict") or "unknown"
+            lines.append(
+                f"{_dataset_display(urn)}: metadata by '{info['agent']}' "
+                f"| trust {trust_txt} | {verdict}"
+            )
+            if verdict == HARMFUL:
+                lines.append(
+                    f"WARNING: '{info['agent']}' scores worse than chance; "
+                    "treat this metadata with caution."
+                )
+        if not lines:
+            return None
+        return "--- heimdall trust context ---\n" + "\n".join(lines)
+
+    # -- the proxy call ----------------------------------------------------------
+
+    async def handle(
+        self, name: str, arguments: Optional[dict[str, Any]]
+    ) -> list[Any]:
+        args = arguments or {}
+        mutation = self.is_mutation(name)
+        if mutation:
+            rejection = self.check_policy()
+            if rejection is not None:
+                _log(f"blocked {name} from {self.agent_id}")
+                raise PermissionError(rejection)
+            self.record_implicit_claim(name, args)
+
+        result = await self.downstream.call_tool(name, args)
+        text = "\n".join(
+            b.text for b in result.content if getattr(b, "text", None)
+        )
+        if result.isError:
+            raise RuntimeError(text[:1000] or f"{name} failed downstream")
+
+        content = list(result.content)
+        if not mutation:
+            context = self.trust_context(text)
+            if context:
+                content.append(types.TextContent(type="text", text=context))
+
+        # tools that declare an outputSchema must answer with structured
+        # content; forward the downstream's structured payload untouched
+        # (the trust block rides in the content stream alongside it)
+        structured = getattr(result, "structuredContent", None)
+        if structured is not None:
+            return content, structured
+        return content
+
+
+# -- production wiring ---------------------------------------------------------
+
+
+def make_trust_lookup(graph: Any) -> Callable[[str], Optional[dict[str, Any]]]:
+    """Read heimdall structured properties for an entity from DataHub."""
+    from datahub.metadata.schema_classes import StructuredPropertiesClass
+
+    def lookup(urn: str) -> Optional[dict[str, Any]]:
+        aspect = graph.get_aspect(urn, StructuredPropertiesClass)
+        if aspect is None:
+            return None
+        values: dict[str, Any] = {}
+        for assignment in aspect.properties:
+            if assignment.values:
+                values[assignment.propertyUrn] = assignment.values[0]
+        if PROP_AGENT not in values:
+            return None
+        return {
+            "agent": values.get(PROP_AGENT),
+            "trust": values.get(PROP_TRUST),
+            "verdict": values.get(PROP_VERDICT),
+        }
+
+    return lookup
+
+
+async def serve() -> None:
+    from datahub.ingestion.graph.client import DataHubGraph, DatahubClientConfig
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    from mcp.server.lowlevel import Server
+    from mcp.server.stdio import stdio_server
+
+    from .mcp_client import _server_command
+
+    gms_url = os.environ.get("DATAHUB_GMS_URL", "http://localhost:8080")
+    agent_id = os.environ.get("HEIMDALL_AGENT_ID", "anonymous-agent")
+    db_path = os.environ.get("LEDGER_DB", os.path.expanduser("~/heimdall.db"))
+    policy = os.environ.get("HEIMDALL_POLICY", POLICY_ANNOTATE)
+    min_trust = float(os.environ.get("HEIMDALL_MIN_TRUST", "0"))
+    implicit_conf = float(os.environ.get("HEIMDALL_IMPLICIT_CONFIDENCE", "0.6"))
+
+    params = StdioServerParameters(
+        command=_server_command(),
+        env={
+            **os.environ,
+            "DATAHUB_GMS_URL": gms_url,
+            "TOOLS_IS_MUTATION_ENABLED": "true",
+        },
+    )
+    async with stdio_client(params) as (dread, dwrite):
+        async with ClientSession(dread, dwrite) as downstream:
+            await downstream.initialize()
+            tools = (await downstream.list_tools()).tools
+
+            store = ClaimStore(db_path)
+            graph = DataHubGraph(DatahubClientConfig(server=gms_url))
+            gateway = TrustGateway(
+                downstream=downstream,
+                store=store,
+                trust_lookup=make_trust_lookup(graph),
+                agent_id=agent_id,
+                policy=policy,
+                min_trust=min_trust,
+                implicit_confidence=implicit_conf,
+            )
+            gateway.set_tools(tools)
+            _log(
+                f"serving {len(tools)} tools for agent '{agent_id}' "
+                f"(policy={policy}, min_trust={min_trust})"
+            )
+
+            server = Server("heimdall-gateway")
+
+            @server.list_tools()
+            async def _list_tools() -> list[types.Tool]:
+                return tools
+
+            @server.call_tool()
+            async def _call_tool(name: str, arguments: dict[str, Any]):
+                return await gateway.handle(name, arguments)
+
+            async with stdio_server() as (read, write):
+                await server.run(
+                    read, write, server.create_initialization_options()
+                )
+
+
+def main() -> None:
+    import asyncio
+
+    asyncio.run(serve())
+
+
+if __name__ == "__main__":
+    main()
