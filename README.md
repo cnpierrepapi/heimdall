@@ -31,9 +31,75 @@ Generic agent tracers (Langfuse, Arize, Fiddler) watch prompts, tokens, and late
 
 Fully open stack. The scoring engine is pure Python. The agent facing LLM runs on any OpenAI compatible endpoint (default an open weight Qwen model); no proprietary model is required.
 
-## Status
+## Quickstart
 
-Under active development for the DataHub Agent Hackathon. Setup instructions, examples, and a demo walkthrough land here as components ship.
+You need a running DataHub with the MCP server, Python 3.11+, and any
+OpenAI-compatible model endpoint (the default stack is an open-weight Qwen; no
+proprietary model is required). Full prerequisites and the environment table are
+in [examples/README.md](examples/README.md).
+
+The whole loop runs from a clean checkout with one command:
+
+```bash
+bash examples/run_all.sh
+```
+
+That seeds a 12-dataset warehouse graph into DataHub, turns four agents loose on
+it through the gateway, settles their claims against ground truth, writes the
+earned trust back into the catalog, and proves the gateway blocks the agent that
+earned distrust while reads keep working. It ends with `ALL STAGES PASSED` or a
+nonzero exit. Each stage is also a script you can run and inspect on its own;
+the walkthrough covers them one at a time.
+
+To put the gateway in front of your own agent, point its MCP client at heimdall
+instead of the raw server:
+
+```bash
+HEIMDALL_AGENT_ID=my-agent \
+HEIMDALL_POLICY=enforce \
+HEIMDALL_MIN_TRUST=55 \
+python -m heimdall.gateway
+```
+
+The agent keeps the identical tool surface. It now also accumulates a settled
+record, gets its writes graded against the catalog in flight, and inherits the
+trust of whoever authored the metadata it reads.
+
+## Console
+
+A live console reads the public projection of the ledger: the activity feed,
+the leaderboard by work kind, and the grounded findings with deep links back
+into DataHub. It is at [heimdall-tech.vercel.app](https://heimdall-tech.vercel.app).
+The tables it reads and their row-level security are in
+[console/supabase/schema.sql](console/supabase/schema.sql);
+`scripts/publish_snapshot.py` produces the rows.
+
+## Repository layout
+
+```
+heimdall/          the package
+  gateway.py         the MCP trust gateway (observe, ground, govern, annotate)
+  observability.py   the event store: every observed tool call
+  grounding.py       catalog-grounded evaluators (the moat)
+  claims.py          the claim ledger; settle.py settles against ground truth
+  skill.py           skill-vs-luck decomposition and trust scores
+  trust.py           per-(agent, work_kind) scoring; select.py picks the best
+  policy.py          accept / pass / hold / block decisions
+  writeback.py       projects trust and dossiers back into DataHub
+  snapshot.py        builds the console projection
+  simulator/         the demo world and its ground truth
+examples/          the end-to-end walkthrough
+scripts/           runnable stages and proofs
+console/           the Next.js console
+tests/             the test suite
+```
+
+## Tests
+
+```bash
+pip install -e ".[dev]"
+pytest -q
+```
 
 ## License
 

@@ -107,11 +107,15 @@ HEIMDALL_MIN_TRUST=55 \
 python -m heimdall.gateway
 ```
 
-### 5. Publish the public board (optional)
+### 5. Publish the public console (optional)
 
 ```bash
-SUPABASE_URL=... SUPABASE_SERVICE_KEY=... python scripts/publish_scoreboard.py
+MCP_SERVER_DATAHUB=~/dh/bin/mcp-server-datahub python scripts/publish_snapshot.py
 ```
 
-Pushes the ledger projections to the public scoreboard. The live instance
-for this repo is https://heimdall-scoreboard.vercel.app.
+Runs a rich session (an expert, a rogue, and a guarded agent under enforce),
+grounds and scores it, and prints three JSON payloads (`ACTIVITY_JSON`,
+`FINDINGS_JSON`, `AGENTS_JSON`). An operator holding the Supabase service role
+key loads those into the `hd_activity`, `hd_findings`, and `hd_agents` tables
+(schema in `console/supabase/schema.sql`) that the console reads. The live
+console for this repo is https://heimdall-tech.vercel.app.
