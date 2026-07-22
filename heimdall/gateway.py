@@ -29,6 +29,7 @@ Configuration is by environment, one gateway process per connected agent:
   HEIMDALL_POLICY              annotate (default) or enforce
   HEIMDALL_MIN_TRUST           hard trust floor for mutations in enforce mode
   HEIMDALL_CATALOG             grounding source for policy (world = demo)
+  HEIMDALL_WORLD_PATH          spec file of a generated catalog to ground against
   HEIMDALL_ACCEPT_AT           trust at/above which a clean write auto-accepts
   HEIMDALL_HOLD_FLOOR          proven trust below which a clean write is held
   HEIMDALL_IMPLICIT_CONFIDENCE prior confidence for implicit claims (0.6)
@@ -456,9 +457,15 @@ async def serve() -> None:
     # a live DataHubCatalogContext is the production backing (same evaluators).
     catalog_context: Optional[CatalogContext] = None
     if os.environ.get("HEIMDALL_CATALOG", "world") == "world":
-        from .grounding import WorldCatalogContext
-        from .simulator.world import build_default_world
-        catalog_context = WorldCatalogContext(build_default_world())
+        world_path = os.environ.get("HEIMDALL_WORLD_PATH")
+        if world_path:
+            # a generated catalog instance: ground policy against this exact world
+            from .catalog import world_catalog_context
+            catalog_context = world_catalog_context(world_path)
+        else:
+            from .grounding import WorldCatalogContext
+            from .simulator.world import build_default_world
+            catalog_context = WorldCatalogContext(build_default_world())
     thresholds = PolicyThresholds(
         accept_at=float(os.environ.get("HEIMDALL_ACCEPT_AT", "70")),
         hold_floor=float(os.environ.get("HEIMDALL_HOLD_FLOOR", "55")),

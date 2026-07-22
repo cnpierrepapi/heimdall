@@ -19,8 +19,10 @@ PLATFORM = "postgres"
 DB = "lineworld"
 
 
-def dataset_urn(name: str) -> str:
-    return f"urn:li:dataset:(urn:li:dataPlatform:{PLATFORM},{DB}.{name},PROD)"
+def dataset_urn(name: str, platform: Optional[str] = None, db: Optional[str] = None) -> str:
+    plat = platform or PLATFORM
+    database = db or DB
+    return f"urn:li:dataset:(urn:li:dataPlatform:{plat},{database}.{name},PROD)"
 
 
 @dataclass(frozen=True)
@@ -43,10 +45,14 @@ class Dataset:
     owner: Optional[str] = None  # owning team (governance truth)
     domain: Optional[str] = None  # business domain (governance truth)
     table_keywords: tuple[str, ...] = ()  # steward accepts table docs containing one
+    # per-instance namespace: generated catalogs override these so their urns are
+    # unique; None falls back to the module PLATFORM/DB (the default lineworld).
+    platform: Optional[str] = None
+    db: Optional[str] = None
 
     @property
     def urn(self) -> str:
-        return dataset_urn(self.name)
+        return dataset_urn(self.name, self.platform, self.db)
 
 
 class World:
