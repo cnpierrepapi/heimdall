@@ -50,11 +50,26 @@ Use Python 3.11 or 3.12. The dependency stack (pydantic, acryl-datahub) ships
 prebuilt wheels for those; on Python 3.13+ pip may try to compile pydantic-core
 from source and fail unless you have a Rust toolchain.
 
+macOS/Linux:
+
 ```bash
 git clone https://github.com/cnpierrepapi/heimdall
 cd heimdall
 python3.12 -m venv .venv
-# Windows: .venv\Scripts\activate     macOS/Linux: source .venv/bin/activate
+source .venv/bin/activate
+python -m pip install -U pip
+pip install -e ".[dev]"
+pytest -q
+```
+
+Windows (PowerShell; `python3.12` does not exist on Windows, use the `py`
+launcher so you do not silently fall through to a newer system Python):
+
+```powershell
+git clone https://github.com/cnpierrepapi/heimdall
+cd heimdall
+py -3.12 -m venv .venv
+.venv\Scripts\activate
 python -m pip install -U pip
 pip install -e ".[dev]"
 pytest -q
