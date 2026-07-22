@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "../../lib/supabase/client";
 import { EyeSigil } from "../../components/ui";
+import { DemoSignIn, DEMO_EMAIL, DEMO_PASSWORD } from "../../components/DemoSignIn";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -34,11 +35,26 @@ export default function LoginPage() {
           <EyeSigil />
           <span className="brand-name">Heimdall</span>
         </div>
-        <h1 className="login-title">Sign in to your tenant</h1>
+        <h1 className="login-title">Heimdall is open</h1>
         <p className="login-sub">
-          The public showcase is open to everyone. Signing in scopes the console to your
-          own catalog: your agents, your activity, your grounded findings.
+          The public console needs no login at all. Signing in is only to see a private tenant
+          view, scoped to one customer's own catalog by row level security. To try that as a
+          judge, enter the read only demo tenant in one click.
         </p>
+
+        <div className="login-demo">
+          <DemoSignIn label="Enter the demo tenant" redirect="/" variant="solid" />
+          <p className="login-demo-note">
+            Or type the demo credentials below:
+            <br />
+            <span className="mono">{DEMO_EMAIL}</span> / <span className="mono">{DEMO_PASSWORD}</span>
+          </p>
+        </div>
+
+        <div className="login-divider">
+          <span>sign in manually</span>
+        </div>
+
         <form className="login-form" onSubmit={onSubmit}>
           <label>
             <span>Email</span>
@@ -65,6 +81,7 @@ export default function LoginPage() {
             {busy ? "Signing in..." : "Sign in"}
           </button>
         </form>
+
         <a className="login-back" href="/">
           <span aria-hidden="true">{"←"}</span> back to the public showcase
         </a>

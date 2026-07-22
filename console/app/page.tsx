@@ -207,6 +207,14 @@ export default async function Home() {
           catalog context, scores skill against luck, governs writes in flight, and writes
           trust back where your team can see it.
         </p>
+        <div className="hero-ctas">
+          <a className="cta cta-solid" href="/judge">
+            Judges start here <span aria-hidden="true">{"→"}</span>
+          </a>
+          <a className="cta cta-ghost" href="#activity">
+            Explore the live console
+          </a>
+        </div>
         <ol className="bridge" aria-label="The Heimdall pipeline">
           {PIPELINE.map((s) => (
             <li className="bridge-node" key={s.n}>

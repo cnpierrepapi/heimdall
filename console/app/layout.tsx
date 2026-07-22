@@ -34,6 +34,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <span className="brand-name">Heimdall</span>
             </a>
             <nav className="topnav" aria-label="Sections">
+              <a href="/judge">For judges</a>
               <a href="/#activity">Activity</a>
               <a href="/#leaderboard">Leaderboard</a>
               <a href="/#findings">Findings</a>

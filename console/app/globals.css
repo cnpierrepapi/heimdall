@@ -1151,3 +1151,228 @@ a:hover {
 .login-back:hover {
   color: var(--aurora);
 }
+
+/* -------------------------------------------------------------------
+   Judge walkthrough, hero CTAs, one-click demo (onboarding)
+------------------------------------------------------------------- */
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.7rem 1.3rem;
+  cursor: pointer;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, border-color 0.2s ease, color 0.2s ease,
+    background 0.2s ease;
+}
+.cta-solid {
+  color: var(--bg);
+  background: var(--aurora);
+}
+.cta-solid:hover {
+  transform: translateY(-1px);
+  background: var(--aurora-soft);
+}
+.cta-ghost {
+  color: var(--ink);
+  background: transparent;
+  border-color: var(--line);
+}
+.cta-ghost:hover {
+  border-color: var(--aurora);
+  color: var(--aurora);
+}
+.cta:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
+.hero-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin: 1.8rem 0 0.4rem;
+}
+
+.demo-signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.demo-error {
+  color: var(--red);
+  font-size: 0.84rem;
+}
+
+/* judge page */
+.judge-hero {
+  padding: 2.4rem 0 1rem;
+  max-width: 44rem;
+}
+.judge-hero h1 {
+  font-family: var(--font-display), serif;
+  font-weight: 500;
+  font-size: clamp(2rem, 5vw, 3.1rem);
+  line-height: 1.05;
+  margin: 0.6rem 0 0;
+}
+.judge-hero h1 em {
+  color: var(--aurora);
+  font-style: italic;
+}
+.judge-start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin: 1.6rem 0 2rem;
+}
+.judge-snapshot {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.snap {
+  background: var(--bg);
+  padding: 1.1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.snap-n {
+  font-family: var(--font-display), serif;
+  font-size: 1.9rem;
+  line-height: 1;
+}
+.snap-l {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.snap-bad .snap-n {
+  color: var(--red);
+}
+.snap-held .snap-n {
+  color: var(--violet);
+}
+
+.judge-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.judge-step {
+  display: flex;
+  gap: 1.2rem;
+  padding: 1.3rem 1.4rem;
+}
+.judge-step-n {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.9rem;
+  color: var(--aurora);
+  flex: none;
+  padding-top: 0.2rem;
+}
+.judge-step-body h3 {
+  font-family: var(--font-display), serif;
+  font-weight: 500;
+  font-size: 1.2rem;
+  margin: 0 0 0.5rem;
+}
+.judge-step-body p {
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0 0 0.9rem;
+}
+.judge-step-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem 1.2rem;
+}
+.judge-live {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.8rem;
+  color: var(--aurora);
+  padding: 0.25rem 0.7rem;
+  border: 1px solid rgba(75, 227, 176, 0.3);
+  border-radius: 999px;
+  background: rgba(75, 227, 176, 0.06);
+}
+.judge-link {
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 1px;
+}
+.judge-link:hover {
+  color: var(--aurora);
+  border-color: var(--aurora);
+}
+.judge-byo {
+  padding: 1.5rem;
+}
+.judge-byo p {
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0 0 1.2rem;
+}
+.judge-byo-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* login demo block */
+.login-demo {
+  margin: 0.4rem 0 1.4rem;
+  padding: 1.1rem;
+  border: 1px solid rgba(75, 227, 176, 0.25);
+  border-radius: 12px;
+  background: rgba(75, 227, 176, 0.05);
+}
+.login-demo-note {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  margin: 0.9rem 0 0;
+}
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  color: var(--dim);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0.4rem 0 1.2rem;
+}
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+@media (max-width: 640px) {
+  .judge-snapshot {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
