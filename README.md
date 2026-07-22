@@ -33,6 +33,10 @@ Fully open stack. The scoring engine is pure Python. The agent facing LLM runs o
 
 ## Quickstart
 
+Evaluating this project? [SETUP.md](SETUP.md) has a three-track guide: look at
+the live console (no setup), run the scoring core from a clean clone (zero
+services), or run the full live loop against your own DataHub.
+
 You need a running DataHub with the MCP server, Python 3.11+, and any
 OpenAI-compatible model endpoint (the default stack is an open-weight Qwen; no
 proprietary model is required). Full prerequisites and the environment table are

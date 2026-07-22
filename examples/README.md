@@ -17,7 +17,8 @@ distrust. Every stage is a script you can run and verify.
   export TOOLS_IS_MUTATION_ENABLED=true   # enable write tools on OSS
   ```
 
-- Python 3.11+.
+- Python 3.11 or 3.12 (the pydantic and acryl-datahub wheels do not yet cover
+  3.13+, where install would fall back to a source build).
 - Any OpenAI-compatible model endpoint. The default stack is open weight
   (Qwen3 32B via OpenRouter); nothing in the code is provider specific.
 
