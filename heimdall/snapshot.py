@@ -29,9 +29,12 @@ def _iso(ts: float) -> str:
 
 
 def activity_rows(
-    event_store: EventStore, owner: str = SHOWCASE, catalog: str = CATALOG, limit: int = 150
+    event_store: EventStore, owner: str = SHOWCASE, catalog: str = CATALOG,
+    limit: int = 150, since_ts: float | None = None,
 ) -> list[dict[str, Any]]:
     events = event_store.events()
+    if since_ts is not None:
+        events = [e for e in events if e.ts >= since_ts]
     events = events[-limit:]  # most recent
     return [
         {
@@ -45,15 +48,19 @@ def activity_rows(
 
 
 def findings_rows(
-    finding_store: FindingStore, owner: str = SHOWCASE, catalog: str = CATALOG
+    finding_store: FindingStore, owner: str = SHOWCASE, catalog: str = CATALOG,
+    since_ts: float | None = None,
 ) -> list[dict[str, Any]]:
+    findings = finding_store.findings()
+    if since_ts is not None:
+        findings = [f for f in findings if f.ts >= since_ts]
     return [
         {
             "agent_id": f.agent_id, "check_type": f.check_type, "severity": f.severity,
             "verdict": f.verdict, "entity_urn": f.entity_urn, "column": f.column,
             "reason": f.reason, "ts": _iso(f.ts), "owner": owner, "catalog": catalog,
         }
-        for f in finding_store.findings()
+        for f in findings
     ]
 
 
