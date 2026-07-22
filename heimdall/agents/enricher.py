@@ -47,10 +47,12 @@ def undocumented_columns(schema: Any) -> list[str]:
 class EnricherAgent:
     agent_id = "enricher"
 
-    def __init__(self, mcp: DataHubMCP, llm: LLMClient, agent_id: str = "enricher"):
+    def __init__(self, mcp: DataHubMCP, llm: LLMClient, agent_id: str = "enricher",
+                 system: str = _SYSTEM):
         self.mcp = mcp
         self.llm = llm
         self.agent_id = agent_id
+        self.system = system
 
     # -- evidence gathering (fixed steps, no model involvement) -------------
 
@@ -82,7 +84,7 @@ class EnricherAgent:
             + f"UNDOCUMENTED COLUMNS ({len(targets)}): {', '.join(targets)}"
         )
 
-        parsed = self.llm.chat_json(_SYSTEM, user, max_tokens=1500)
+        parsed = self.llm.chat_json(self.system, user, max_tokens=1500)
         proposals = {
             p.get("column"): p
             for p in parsed.get("proposals", [])

@@ -42,10 +42,12 @@ An empty flags list is a valid answer. Confidence is your probability that a dat
 class PiiTaggerAgent:
     agent_id = "pii-tagger"
 
-    def __init__(self, mcp: DataHubMCP, llm: LLMClient, agent_id: str = "pii-tagger"):
+    def __init__(self, mcp: DataHubMCP, llm: LLMClient, agent_id: str = "pii-tagger",
+                 system: str = _SYSTEM):
         self.mcp = mcp
         self.llm = llm
         self.agent_id = agent_id
+        self.system = system
 
     def propose(self, dataset_urn: str, model_id: str = "") -> list[Claim]:
         schema = self.mcp.list_schema_fields(dataset_urn)
@@ -54,7 +56,7 @@ class PiiTaggerAgent:
             for f in (schema.get("fields", []) if isinstance(schema, dict) else [])
         }
         user = f"TABLE: {dataset_urn}\nSCHEMA: {as_text(schema, 2500)}"
-        parsed = self.llm.chat_json(_SYSTEM, user, max_tokens=800)
+        parsed = self.llm.chat_json(self.system, user, max_tokens=800)
 
         claims: list[Claim] = []
         now = time.time()
