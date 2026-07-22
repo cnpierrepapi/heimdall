@@ -1,4 +1,4 @@
-import { Tone, verdictShort, verdictTone } from "../lib/data";
+import { Tone, verdictShort, verdictTone } from "../lib/view";
 
 /* The trust sigil: a rune-ring gauge. Arc length = trust score, tone sets the metal. */
 export function TrustRing({

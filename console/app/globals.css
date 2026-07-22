@@ -1009,3 +1009,145 @@ a:hover {
     font-size: 31px;
   }
 }
+
+/* -------------------------------------------------------------------
+   Auth: sign-in control, tenant banner, login card (F1)
+------------------------------------------------------------------- */
+.authbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-left: 0.9rem;
+  margin-left: 0.3rem;
+  border-left: 1px solid var(--line);
+}
+.authbox-who {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.authbox-btn,
+.authbox-signin {
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.28rem 0.8rem;
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+.authbox-btn:hover,
+.authbox-signin:hover {
+  border-color: var(--aurora);
+  color: var(--aurora);
+}
+
+.tenant-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1.4rem 0 -0.6rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid rgba(75, 227, 176, 0.25);
+  border-radius: 12px;
+  background: rgba(75, 227, 176, 0.05);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.tenant-banner strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.tenant-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--aurora);
+  box-shadow: 0 0 10px var(--aurora);
+  flex: none;
+}
+
+.login-wrap {
+  display: flex;
+  justify-content: center;
+  padding-top: 3rem;
+  padding-bottom: 4rem;
+}
+.login-card {
+  max-width: 30rem;
+  width: 100%;
+  padding: 2rem;
+}
+.login-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.2rem;
+}
+.login-title {
+  font-family: var(--font-display), serif;
+  font-size: 1.7rem;
+  margin: 0 0 0.5rem;
+}
+.login-sub {
+  color: var(--muted);
+  font-size: 0.94rem;
+  line-height: 1.5;
+  margin: 0 0 1.5rem;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+.login-form input {
+  font: inherit;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+}
+.login-form input:focus {
+  outline: none;
+  border-color: var(--aurora);
+}
+.login-form button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--aurora);
+  border: none;
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+  margin-top: 0.4rem;
+}
+.login-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.login-error {
+  color: var(--red);
+  font-size: 0.86rem;
+  margin: 0;
+}
+.login-back {
+  display: inline-block;
+  margin-top: 1.4rem;
+  color: var(--dim);
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.login-back:hover {
+  color: var(--aurora);
+}

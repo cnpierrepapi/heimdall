@@ -5,6 +5,7 @@ import {
   getActivity,
   getAgents,
   getFindings,
+  getViewer,
   relativeTime,
   verdictTone,
   WORK_KIND_LABEL,
@@ -17,7 +18,7 @@ import {
   VerdictChip,
 } from "../../../components/ui";
 
-export const revalidate = 30;
+export const dynamic = "force-dynamic";
 
 export default async function AgentPage({
   params,
@@ -26,10 +27,11 @@ export default async function AgentPage({
 }) {
   const { agent } = await params;
   const agentId = decodeURIComponent(agent);
+  const viewer = await getViewer();
   const [agents, activity, findings] = await Promise.all([
     getAgents(),
-    getActivity(),
-    getFindings(),
+    getActivity(viewer.owner),
+    getFindings(viewer.owner),
   ]);
 
   const kinds = agents.filter((a) => a.agent_id === agentId);

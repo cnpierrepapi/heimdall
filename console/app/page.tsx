@@ -8,6 +8,7 @@ import {
   getActivity,
   getAgents,
   getFindings,
+  getViewer,
   relativeTime,
   verdictTone,
   WORK_KIND_LABEL,
@@ -20,7 +21,7 @@ import {
   VerdictChip,
 } from "../components/ui";
 
-export const revalidate = 30;
+export const dynamic = "force-dynamic";
 
 const PIPELINE = [
   { n: "01", name: "observe", desc: "every call at the gateway" },
@@ -169,10 +170,11 @@ function Findings({ findings }: { findings: FindingRow[] }) {
 }
 
 export default async function Home() {
+  const viewer = await getViewer();
   const [agents, activity, findings] = await Promise.all([
     getAgents(),
-    getActivity(),
-    getFindings(),
+    getActivity(viewer.owner),
+    getFindings(viewer.owner),
   ]);
 
   const distinctAgents = new Set(agents.map((a) => a.agent_id)).size;
@@ -181,6 +183,14 @@ export default async function Home() {
 
   return (
     <main className="wrap">
+      {viewer.isTenant && (
+        <div className="tenant-banner">
+          <span className="tenant-dot" aria-hidden="true" />
+          Signed in as <strong>{viewer.email}</strong>. Showing your tenant{" "}
+          <span className="mono">{viewer.owner}</span>: your agents, activity, and findings,
+          scoped by row level security.
+        </div>
+      )}
       <section className="hero">
         <p className="eyebrow">
           <span className="live-dot" aria-hidden="true" />

@@ -78,23 +78,68 @@ create table if not exists hd_agents (
 create index if not exists idx_hd_agents_trust on hd_agents (trust desc);
 
 -- ---------------------------------------------------------------------------
--- Row level security: anon and authenticated read; only the service role
--- writes (the publisher). Revoke the write and DDL-adjacent grants Postgres
--- hands out by default so a fresh provision matches the intended posture.
+-- Tenancy: map auth users to tenants (owners).
+-- ---------------------------------------------------------------------------
+create table if not exists hd_members (
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  owner      text not null,
+  role       text not null default 'member',
+  created_at timestamptz not null default now(),
+  primary key (user_id, owner)
+);
+
+-- Resolve the caller's tenants without exposing hd_members to anon. Lives in an
+-- unexposed schema so it is not a public /rpc endpoint, and runs as definer so
+-- RLS policies can call it. Returns nothing for anonymous callers.
+create schema if not exists heimdall;
+grant usage on schema heimdall to anon, authenticated;
+
+create or replace function heimdall.current_owners()
+returns setof text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select owner from public.hd_members where user_id = auth.uid()
+$$;
+
+revoke all on function heimdall.current_owners() from public;
+grant execute on function heimdall.current_owners() to anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Row level security. The public showcase (owner = 'showcase') stays
+-- anon-readable; authenticated users also see rows for tenants they belong to.
+-- Public agents are visible to everyone; a private agent's scores are readable
+-- only by its owning tenant. Only the service role writes (the publisher).
 -- ---------------------------------------------------------------------------
 alter table hd_activity enable row level security;
 alter table hd_findings enable row level security;
 alter table hd_agents   enable row level security;
+alter table hd_members  enable row level security;
+
+drop policy if exists hd_members_self_read on hd_members;
+create policy hd_members_self_read on hd_members
+  for select to authenticated using (user_id = auth.uid());
 
 drop policy if exists hd_activity_read on hd_activity;
-create policy hd_activity_read on hd_activity for select using (true);
+create policy hd_activity_read on hd_activity for select using (
+  owner = 'showcase' or owner in (select heimdall.current_owners())
+);
 
 drop policy if exists hd_findings_read on hd_findings;
-create policy hd_findings_read on hd_findings for select using (true);
+create policy hd_findings_read on hd_findings for select using (
+  owner = 'showcase' or owner in (select heimdall.current_owners())
+);
 
 drop policy if exists hd_agents_read on hd_agents;
-create policy hd_agents_read on hd_agents for select using (true);
+create policy hd_agents_read on hd_agents for select using (
+  visibility = 'public'
+  or owner = 'showcase'
+  or owner in (select heimdall.current_owners())
+);
 
-revoke all on hd_activity, hd_findings, hd_agents from anon, authenticated;
+revoke all on hd_activity, hd_findings, hd_agents, hd_members from anon, authenticated;
 grant select on hd_activity, hd_findings, hd_agents to anon, authenticated;
-grant all on hd_activity, hd_findings, hd_agents to service_role;
+grant select on hd_members to authenticated;
+grant all on hd_activity, hd_findings, hd_agents, hd_members to service_role;

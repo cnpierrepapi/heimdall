@@ -1,114 +1,56 @@
-// Read-only projection of the public Heimdall tables (anon key, RLS-guarded).
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://xfgfgcdawvfrubuczwtn.supabase.co";
-const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-export const DATAHUB_URL =
-  process.env.NEXT_PUBLIC_DATAHUB_URL ?? "https://datahub.onenept.com";
+// Session-aware projection of the Heimdall tables. Reads run through the
+// per-request Supabase client so RLS scopes rows to the signed-in tenant, or
+// to the public showcase when there is no session. This module is server only
+// (it touches request cookies); the client-safe helpers live in view.ts and
+// are re-exported here so existing imports keep working.
+import { createClient } from "./supabase/server";
+import type { AgentRow, ActivityRow, FindingRow, Viewer } from "./view";
 
-async function q<T>(path: string): Promise<T[]> {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-      headers: { apikey: ANON, Authorization: `Bearer ${ANON}` },
-      next: { revalidate: 30 },
-    });
-    if (!res.ok) return [];
-    return (await res.json()) as T[];
-  } catch {
-    return [];
-  }
+export * from "./view";
+
+export async function getViewer(): Promise<Viewer> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { email: null, owner: "showcase", isTenant: false };
+  const { data } = await supabase
+    .from("hd_members")
+    .select("owner")
+    .order("owner")
+    .limit(1);
+  const owner = data && data[0]?.owner ? (data[0].owner as string) : "showcase";
+  return { email: user.email ?? null, owner, isTenant: owner !== "showcase" };
 }
 
-export type AgentRow = {
-  agent_id: string;
-  work_kind: string;
-  trust: number | null;
-  verdict: string | null;
-  n_settled: number | null;
-  brier: number | null;
-  win_rate: number | null;
-  visibility: string | null;
-  owner: string | null;
-  catalog: string | null;
-};
-
-export type ActivityRow = {
-  id: number;
-  agent_id: string;
-  tool: string;
-  op: string;
-  status: string;
-  entities: string[] | null;
-  latency_ms: number | null;
-  result_summary: string | null;
-  ts: string;
-};
-
-export type FindingRow = {
-  id: number;
-  agent_id: string;
-  check_type: string;
-  severity: string;
-  verdict: string | null;
-  entity_urn: string | null;
-  column: string | null;
-  reason: string | null;
-  ts: string;
-};
-
-export const getAgents = () => q<AgentRow>("hd_agents?order=trust.desc");
-export const getActivity = () =>
-  q<ActivityRow>("hd_activity?owner=eq.showcase&order=ts.desc&limit=40");
-export const getFindings = () =>
-  q<FindingRow>("hd_findings?owner=eq.showcase&order=ts.desc");
-
-export const WORK_KIND_LABEL: Record<string, string> = {
-  column_doc: "Column documentation",
-  table_doc: "Table documentation",
-  pii: "PII tagging",
-  owner: "Ownership",
-  domain: "Domain assignment",
-  term: "Glossary terms",
-};
-
-export const CHECK_LABEL: Record<string, string> = {
-  glossary_conflict: "Glossary conflict",
-  pii_scope: "PII scope",
-  undefined_column: "Undefined column",
-  low_quality_description: "Low quality description",
-  wrong_owner: "Wrong owner",
-  wrong_domain: "Wrong domain",
-};
-
-// dataset urn -> short name and a DataHub deep link
-export function datasetName(urn: string): string {
-  const m = urn.match(/,([^,]+),PROD\)/);
-  return m ? m[1] : urn;
-}
-export function datahubLink(urn: string): string {
-  return `${DATAHUB_URL}/dataset/${encodeURIComponent(urn)}/`;
+// The leaderboard is global: RLS returns every public agent plus any private
+// agents the viewer's tenant owns.
+export async function getAgents(): Promise<AgentRow[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("hd_agents")
+    .select("*")
+    .order("trust", { ascending: false, nullsFirst: false });
+  return (data as AgentRow[] | null) ?? [];
 }
 
-export type Tone = "good" | "neutral" | "bad" | "none";
-
-export function verdictTone(verdict: string | null): Tone {
-  if (verdict === "skilled") return "good";
-  if (verdict === "worse than chance") return "bad";
-  if (verdict === "insufficient settled claims" || verdict == null) return "none";
-  return "neutral";
+export async function getActivity(owner = "showcase"): Promise<ActivityRow[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("hd_activity")
+    .select("*")
+    .eq("owner", owner)
+    .order("ts", { ascending: false })
+    .limit(40);
+  return (data as ActivityRow[] | null) ?? [];
 }
 
-export function verdictShort(verdict: string | null): string {
-  if (verdict === "skilled") return "skilled";
-  if (verdict === "worse than chance") return "worse than chance";
-  if (verdict === "not distinguishable from luck") return "luck range";
-  if (verdict === "insufficient settled claims") return "insufficient data";
-  return "unrated";
-}
-
-export function relativeTime(ts: string): string {
-  const d = (Date.now() - new Date(ts).getTime()) / 1000;
-  if (d < 90) return `${Math.max(1, Math.round(d))}s ago`;
-  if (d < 5400) return `${Math.round(d / 60)}m ago`;
-  if (d < 129600) return `${Math.round(d / 3600)}h ago`;
-  return `${Math.round(d / 86400)}d ago`;
+export async function getFindings(owner = "showcase"): Promise<FindingRow[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("hd_findings")
+    .select("*")
+    .eq("owner", owner)
+    .order("ts", { ascending: false });
+  return (data as FindingRow[] | null) ?? [];
 }

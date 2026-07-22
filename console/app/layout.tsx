@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, JetBrains_Mono } from "next/font/google";
 import { EyeSigil } from "../components/ui";
+import { getViewer } from "../lib/data";
 import "./globals.css";
 
 const display = Fraunces({
@@ -20,7 +21,8 @@ export const metadata: Metadata = {
     "Heimdall watches every AI agent acting on your DataHub catalog. It observes each action, grounds it in catalog context, scores skill against luck, governs writes in flight, and writes trust back into the catalog.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const viewer = await getViewer();
   return (
     <html lang="en" className={`${display.variable} ${mono.variable}`}>
       <body>
@@ -43,6 +45,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               >
                 DataHub <span aria-hidden="true">{"↗"}</span>
               </a>
+              {viewer.email ? (
+                <span className="authbox">
+                  <span className="authbox-who">
+                    <span className="mono">{viewer.owner}</span>
+                  </span>
+                  <form action="/auth/signout" method="post">
+                    <button type="submit" className="authbox-btn">
+                      Sign out
+                    </button>
+                  </form>
+                </span>
+              ) : (
+                <a className="authbox-signin" href="/login">
+                  Sign in
+                </a>
+              )}
             </nav>
           </div>
           <div className="bifrost-line" aria-hidden="true" />
