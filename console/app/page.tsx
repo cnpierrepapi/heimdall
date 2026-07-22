@@ -107,15 +107,15 @@ function Leaderboard({ agents }: { agents: AgentRow[] }) {
                           <span>{a.n_settled} settled</span>
                         )}
                         {priv && (
-                          <span className="lock-tag" title="Private agent. Scores are not published.">
-                            <span aria-hidden="true">{"◈"}</span> private · request access
+                          <span className="lock-tag" title="Private to your tenant. Only your tenant can see this agent's scores.">
+                            <span aria-hidden="true">{"◈"}</span> private to your tenant
                           </span>
                         )}
                       </span>
                     </div>
                     <div className="board-score">
-                      <TrustRing value={priv ? null : a.trust} tone={verdictTone(a.verdict)} />
-                      <VerdictChip verdict={priv ? null : a.verdict} />
+                      <TrustRing value={a.trust} tone={verdictTone(a.verdict)} />
+                      <VerdictChip verdict={a.verdict} />
                     </div>
                   </li>
                 );

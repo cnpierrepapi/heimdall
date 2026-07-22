@@ -85,25 +85,25 @@ export default async function AgentPage({
           return (
             <article className="panel score-card" key={a.work_kind}>
               <TrustRing
-                value={priv ? null : a.trust}
+                value={a.trust}
                 tone={verdictTone(a.verdict)}
                 size={104}
               />
               <div className="score-body">
                 <h3 className="score-kind">{WORK_KIND_LABEL[a.work_kind] ?? a.work_kind}</h3>
-                <VerdictChip verdict={priv ? null : a.verdict} />
+                <VerdictChip verdict={a.verdict} />
                 <dl className="score-stats">
                   <div>
                     <dt>settled</dt>
                     <dd>{a.n_settled ?? 0}</dd>
                   </div>
-                  {!priv && a.win_rate != null && (
+                  {a.win_rate != null && (
                     <div>
                       <dt>win rate</dt>
                       <dd>{Math.round(a.win_rate * 100)}%</dd>
                     </div>
                   )}
-                  {!priv && a.brier != null && (
+                  {a.brier != null && (
                     <div>
                       <dt>brier</dt>
                       <dd>{a.brier.toFixed(2)}</dd>
@@ -112,7 +112,7 @@ export default async function AgentPage({
                 </dl>
                 {priv && (
                   <span className="lock-tag">
-                    <span aria-hidden="true">{"◈"}</span> private · request access
+                    <span aria-hidden="true">{"◈"}</span> private to your tenant
                   </span>
                 )}
               </div>
