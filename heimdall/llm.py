@@ -13,7 +13,7 @@ import json
 import os
 import re
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 
@@ -35,12 +35,17 @@ class LLMClient:
         model: Optional[str] = None,
         api_key: Optional[str] = None,
         timeout: float = 120.0,
+        usage_sink: Optional[Callable[[dict], None]] = None,
     ):
         self.base_url = (base_url or os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
         self.model = model or os.environ.get("LLM_MODEL", DEFAULT_MODEL)
         self.api_key = api_key or os.environ.get("LLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
         if not self.api_key:
             raise LLMError("no API key: set LLM_API_KEY or OPENROUTER_API_KEY")
+        # called with the provider usage dict after every completion, so the
+        # engine can meter spend against its budget. None = no metering.
+        self.usage_sink = usage_sink
+        self.last_usage: dict = {}
         self._client = httpx.Client(timeout=timeout)
 
     def chat(self, system: str, user: str, max_tokens: int = 2000) -> str:
@@ -54,6 +59,8 @@ class LLMClient:
             "max_tokens": max_tokens,
             # honored by OpenRouter for reasoning-capable models; harmless elsewhere
             "reasoning": {"enabled": False},
+            # ask OpenRouter to return actual credit cost in the usage object
+            "usage": {"include": True},
         }
         resp = self._client.post(
             f"{self.base_url}/chat/completions",
@@ -62,7 +69,15 @@ class LLMClient:
         )
         if resp.status_code != 200:
             raise LLMError(f"LLM HTTP {resp.status_code}: {resp.text[:500]}")
-        content = resp.json()["choices"][0]["message"]["content"] or ""
+        data = resp.json()
+        self.last_usage = data.get("usage") or {}
+        if self.usage_sink is not None:
+            # metering must never break the agent's work
+            try:
+                self.usage_sink(self.last_usage)
+            except Exception:
+                pass
+        content = data["choices"][0]["message"]["content"] or ""
         return _THINK_RE.sub("", content).strip()
 
     def chat_json(
