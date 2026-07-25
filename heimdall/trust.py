@@ -28,15 +28,17 @@ from .grounding import (
     parse_action,
 )
 from .observability import WRITE, ObservationEvent
-from .simulator.steward import (
+from .skill import skill_report
+from .workkinds import (
     KIND_COLUMN_DOC,
     KIND_DOMAIN,
     KIND_OWNER,
     KIND_PII,
     KIND_TABLE_DOC,
     KIND_TERM,
+    score_state,
+    scoreable,
 )
-from .skill import skill_report
 
 SEP = "::"
 IMPLICIT_CONFIDENCE = 0.6
@@ -72,8 +74,25 @@ def _targets(action) -> list[tuple[str, Optional[str]]]:
     return []
 
 
+def event_work_kinds(event: ObservationEvent) -> set[str]:
+    """Which kinds of work one observed write asserts.
+
+    Needed without a catalog in hand: conduct is recorded for actions that were
+    blocked before they could be grounded, and for kinds nothing here can settle.
+    """
+    if event.op != WRITE:
+        return set()
+    action = parse_action(event)
+    if action.tool.startswith("remove_") or action.operation == "remove":
+        return set()
+    return {kind for kind, _ in _targets(action)}
+
+
 def _gradeable(kind: str, dataset: str, column: Optional[str], ctx: CatalogContext) -> bool:
-    """Is there catalog truth to judge a clean write of this kind against?"""
+    """Is there catalog truth to judge a clean write of this kind against?
+
+    Only asked for kinds this deployment can settle at all; see _scoreable_here.
+    """
     if kind == KIND_COLUMN_DOC:
         return bool(column and column in ctx.columns(dataset)
                     and ctx.column_gold_keywords(dataset, column))
@@ -106,8 +125,15 @@ def graded_targets(event: ObservationEvent, ctx: CatalogContext) -> list[GradedW
     out: list[GradedWrite] = []
     for kind, column in _targets(action):
         fs = findings_by_col.get(column, [])
-        if any(f.severity == SEV_HARMFUL for f in fs):
-            correct: Optional[bool] = False       # a grounded violation
+        if not scoreable(kind)[0]:
+            # No settlement source for this kind here, so nothing about it is
+            # scored. Grading only its violations would let an agent bank reverts
+            # it can never offset with accepts, which looks like a trust score
+            # but is really an artifact of what we happen to be able to check.
+            # The write is still observed, still grounded, still governed.
+            correct: Optional[bool] = None
+        elif any(f.severity == SEV_HARMFUL for f in fs):
+            correct = False                        # a grounded violation
         elif fs:
             correct = False                        # a warn (e.g. low quality) still fails
         elif _gradeable(kind, dataset, column, ctx):
@@ -166,8 +192,17 @@ def trust_report(store: ClaimStore, **kwargs: Any) -> dict[str, dict[str, dict[s
     out: dict[str, dict[str, dict[str, Any]]] = {}
     for composite, rec in report.items():
         agent, kind = split_id(composite)
-        out.setdefault(agent, {})[kind] = rec
+        out.setdefault(agent, {})[kind] = _with_score_state(kind, rec, **kwargs)
     return out
+
+
+def _with_score_state(kind: str, rec: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    """Attach the honest state of this score, and why, to a skill record."""
+    state, reason = score_state(
+        kind, rec.get("n_settled", 0),
+        **({"min_settled": kwargs["min_settled"]} if "min_settled" in kwargs else {}),
+    )
+    return {**rec, "score_state": state, "score_reason": reason}
 
 
 def leaderboard(store: ClaimStore, work_kind: str, **kwargs: Any) -> list[dict[str, Any]]:
@@ -222,11 +257,14 @@ def hd_agents_rows(
     for composite, rec in report.items():
         agent, kind = split_id(composite)
         meta = registry.get(agent, {})
+        state, reason = score_state(kind, rec["n_settled"])
         rows.append({
             "agent_id": agent,
             "work_kind": kind,
             "trust": rec["trust"],
             "verdict": rec["verdict"],
+            "score_state": state,
+            "score_reason": reason or None,
             "n_settled": rec["n_settled"],
             "brier": rec.get("brier_mean"),
             "win_rate": rec.get("win_rate"),

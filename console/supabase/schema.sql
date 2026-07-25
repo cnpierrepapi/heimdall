@@ -64,9 +64,29 @@ create table if not exists hd_agents (
   work_kind  text not null,        -- column_doc | table_doc | pii | owner | ...
   trust      numeric,
   verdict    text,
+  -- Whether trust for this work kind can be computed honestly in the deployment
+  -- that produced the row. 'scored' has enough settled evidence; 'insufficient'
+  -- needs more and will get there; 'unscoreable' never will, because nothing
+  -- here settles this kind of work (ownership, for one, is confirmed by an
+  -- organization and not by anything an agent can read). The console ranks only
+  -- 'scored' rows and lists the rest with score_reason shown.
+  score_state  text not null default 'insufficient'
+               check (score_state in ('scored', 'insufficient', 'unscoreable')),
+  score_reason text,
   n_settled  integer default 0,
   brier      numeric,
   win_rate   numeric,
+  -- Conduct: what the agent did, which needs no settlement to be true. Present
+  -- for every agent, including those whose work cannot be scored here.
+  n_actions  integer default 0,
+  n_applied  integer default 0,
+  n_blocked  integer default 0,
+  n_held     integer default 0,
+  n_errored  integer default 0,
+  n_harmful  integer default 0,
+  n_warn     integer default 0,
+  n_entities integer default 0,
+  clean_rate numeric,
   visibility text not null default 'public'
              check (visibility in ('public', 'private')),
   owner      text,

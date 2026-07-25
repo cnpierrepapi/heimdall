@@ -173,14 +173,15 @@ def _gateway_env(cfg: EngineConfig, agent_id: str, enforce: bool,
 
 
 def _run_agent(cfg: EngineConfig, ragent, spend: SpendLedger, dataset_urns: list[str],
-               enforce: bool = False, world_path: Optional[str] = None) -> RunStat:
+               enforce: bool = False, world_path: Optional[str] = None,
+               teams: tuple[str, ...] = ()) -> RunStat:
     llm = LLMClient(model=cfg.model, usage_sink=spend.usage_sink(ragent.agent_id, cfg.model))
     try:
         with DataHubMCP(
             gms_url=cfg.gms_url, command=sys.executable, args=["-m", "heimdall.gateway"],
             extra_env=_gateway_env(cfg, ragent.agent_id, enforce, world_path),
         ) as mcp:
-            return run_roster_agent(ragent, mcp, llm, dataset_urns)
+            return run_roster_agent(ragent, mcp, llm, dataset_urns, teams=teams)
     finally:
         llm.close()
 
@@ -240,6 +241,8 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
 
     # cast: a seeded annotate subset plus one rogue PII tagger under enforce so the
     # feed carries held/blocked events when its over-tagging is caught in flight.
+    # the catalog's own owner pool is the candidate list an owner agent picks from
+    teams = tuple(sorted({d.owner for d in spec.datasets if d.owner}))
     annotate = cast(spec, seed, cfg.cast_size, kinds=CASTABLE_KINDS)
     enforce_agent = next((a for a in ROSTER if a.work_kind == KIND_PII and a.profile == ROGUE), None)
     if enforce_agent is not None:
@@ -250,12 +253,12 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
         runnable, _ = can_run(spend)
         if not runnable or spend.spent_since(tick_start) >= tick_subcap():
             break  # budget guard: stop casting, no fallback
-        stats.append(_run_agent(cfg, ragent, spend, raw_urns))
+        stats.append(_run_agent(cfg, ragent, spend, raw_urns, teams=teams))
     if enforce_agent is not None and spend.spent_since(tick_start) < tick_subcap():
         runnable, _ = can_run(spend)
         if runnable:
             stats.append(_run_agent(cfg, enforce_agent, spend, raw_urns,
-                                    enforce=True, world_path=spec_path))
+                                    enforce=True, world_path=spec_path, teams=teams))
 
     # ground + settle this tick's observations into the durable stores
     new_events = EventStore(cfg.events_db).events(since_ts=tick_start)
@@ -271,7 +274,9 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
                              catalog=spec.catalog, since_ts=tick_start)
     with FindingStore(cfg.findings_db) as fs:
         findings = findings_rows(fs, owner=cfg.owner, catalog=spec.catalog, since_ts=tick_start)
-    agents = agents_rows(trust_store, registry=registry(), catalog=spec.catalog)
+        # conduct spans all history, like trust: both are the accumulated record
+        agents = agents_rows(trust_store, registry=registry(), catalog=spec.catalog,
+                             event_store=EventStore(cfg.events_db), finding_store=fs)
 
     gc = _retention_gc(cfg, keep_catalog=spec.catalog)
 

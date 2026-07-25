@@ -18,13 +18,19 @@ from ..claims import Claim
 from .world import World
 
 # prediction["kind"] values for governance proposals; a missing kind means a
-# plain column documentation proposal (the original enricher shape).
-KIND_COLUMN_DOC = "column_doc"
-KIND_TABLE_DOC = "table_doc"
-KIND_PII = "pii"
-KIND_OWNER = "owner"
-KIND_DOMAIN = "domain"
-KIND_TERM = "term"
+# plain column documentation proposal (the original enricher shape). The kinds
+# themselves are declared once in workkinds, alongside what settles each one.
+from ..workkinds import (  # noqa: E402
+    KIND_COLUMN_DOC,
+    KIND_DOMAIN,
+    KIND_OWNER,
+    KIND_PII,
+    KIND_TABLE_DOC,
+    KIND_TERM,
+)
+
+__all__ = ["KIND_COLUMN_DOC", "KIND_TABLE_DOC", "KIND_PII", "KIND_OWNER",
+           "KIND_DOMAIN", "KIND_TERM", "evaluate"]
 
 
 def evaluate(world: World, claim: Claim) -> bool:

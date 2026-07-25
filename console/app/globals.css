@@ -1376,3 +1376,102 @@ a:hover {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* --------------------------------------------- observed, not scored */
+
+.observed {
+  padding: 22px 24px 18px;
+}
+.observed-lede {
+  margin: 0 0 18px;
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.observed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+.observed-row {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.012);
+}
+.observed-who {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.observed-kind {
+  color: var(--dim);
+  font-size: 13px;
+}
+.observed-why {
+  margin: 8px 0 0;
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: 68ch;
+}
+
+/* the two nulls read differently on purpose: one is waiting, one never will be */
+.state-tag {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+.state-unscoreable {
+  color: var(--dim);
+  border: 1px dashed rgba(158, 196, 184, 0.3);
+}
+.state-insufficient {
+  color: var(--amber);
+  border: 1px solid rgba(231, 193, 105, 0.32);
+}
+.state-scored {
+  color: var(--aurora);
+  border: 1px solid rgba(75, 227, 176, 0.32);
+}
+
+/* --------------------------------------------- conduct */
+
+.conduct {
+  margin: 12px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.conduct-cell {
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  padding: 6px 11px;
+  min-width: 62px;
+}
+.conduct-cell dt {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.conduct-cell dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  color: var(--ink);
+}
+.conduct-cell.is-flag dd {
+  color: var(--red);
+}
+.conduct-cell.is-flag {
+  border-color: rgba(255, 141, 130, 0.3);
+}

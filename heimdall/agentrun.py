@@ -13,21 +13,30 @@ from dataclasses import dataclass
 from typing import Any
 
 from .agents.enricher import EnricherAgent
+from .agents.ownerrec import OwnerRecommenderAgent
 from .agents.piitagger import PiiTaggerAgent
 from .governance import apply_claim
-from .roster import KIND_COLUMN_DOC, KIND_PII, RosterAgent, profile_system
+from .roster import KIND_COLUMN_DOC, KIND_OWNER, KIND_PII, RosterAgent, profile_system
 
 
-def build_agent(ragent: RosterAgent, mcp: Any, llm: Any) -> Any:
+_WRITERS: dict[str, Any] = {
+    KIND_COLUMN_DOC: EnricherAgent,
+    KIND_PII: PiiTaggerAgent,
+    KIND_OWNER: OwnerRecommenderAgent,
+}
+
+
+def build_agent(ragent: RosterAgent, mcp: Any, llm: Any,
+                teams: tuple[str, ...] = ()) -> Any:
     """The concrete writer agent for a roster entry, under its profile prompt."""
-    if ragent.work_kind == KIND_COLUMN_DOC:
-        cls: Any = EnricherAgent
-    elif ragent.work_kind == KIND_PII:
-        cls = PiiTaggerAgent
-    else:
+    if ragent.work_kind not in _WRITERS:
         raise ValueError(f"no writer agent wired for work kind {ragent.work_kind!r}")
     system = profile_system(ragent.work_kind, ragent.profile)
-    return cls(mcp, llm, agent_id=ragent.agent_id, system=system)
+    if ragent.work_kind == KIND_OWNER:
+        # the candidate teams come from the catalog, so the pick is one of n
+        return OwnerRecommenderAgent(mcp, llm, agent_id=ragent.agent_id,
+                                     system=system, teams=teams)
+    return _WRITERS[ragent.work_kind](mcp, llm, agent_id=ragent.agent_id, system=system)
 
 
 @dataclass
@@ -41,10 +50,11 @@ class RunStat:
 
 
 def run_roster_agent(
-    ragent: RosterAgent, mcp: Any, llm: Any, dataset_urns: list[str]
+    ragent: RosterAgent, mcp: Any, llm: Any, dataset_urns: list[str],
+    teams: tuple[str, ...] = (),
 ) -> RunStat:
     """Propose over each dataset and apply through the gateway. Never raises."""
-    agent = build_agent(ragent, mcp, llm)
+    agent = build_agent(ragent, mcp, llm, teams=teams)
     stat = RunStat(ragent.agent_id, ragent.work_kind, ragent.profile)
     for urn in dataset_urns:
         try:

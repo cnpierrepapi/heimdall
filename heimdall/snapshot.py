@@ -16,9 +16,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .claims import ClaimStore
+from .conduct import conduct_rows
 from .grounding import FindingStore
 from .observability import EventStore
 from .trust import hd_agents_rows
+from .workkinds import score_state
 
 SHOWCASE = "showcase"
 CATALOG = "lineworld"
@@ -66,9 +68,42 @@ def findings_rows(
 
 def agents_rows(
     trust_store: ClaimStore, registry: dict[str, dict[str, Any]] | None = None,
-    catalog: str = CATALOG, **kwargs: Any,
+    catalog: str = CATALOG, event_store: EventStore | None = None,
+    finding_store: FindingStore | None = None, **kwargs: Any,
 ) -> list[dict[str, Any]]:
+    """One row per (agent, work_kind), carrying both calibration and conduct.
+
+    The rows are the union of what has been settled and what has been observed,
+    not just the former. An agent whose work this deployment cannot score has no
+    trust and never will, but it has a record, and a console that only listed
+    scored agents would quietly drop the ones most worth watching.
+    """
     rows = hd_agents_rows(trust_store, registry=registry, **kwargs)
+    registry = registry or {}
+
+    conduct: dict[tuple[str, str], dict[str, Any]] = {}
+    if event_store is not None:
+        findings = finding_store.findings() if finding_store is not None else []
+        conduct = conduct_rows(event_store.events(), findings)
+
+    seen = set()
     for r in rows:
+        key = (r["agent_id"], r["work_kind"])
+        seen.add(key)
         r["catalog"] = catalog
+        r.update(conduct.get(key, {}))
+
+    # observed but never settled: still a row, with no score to show for it
+    for (agent, kind) in sorted(conduct.keys() - seen):
+        meta = registry.get(agent, {})
+        state, reason = score_state(kind, 0)
+        rows.append({
+            "agent_id": agent, "work_kind": kind,
+            "trust": None, "verdict": None,
+            "score_state": state, "score_reason": reason or None,
+            "n_settled": 0, "brier": None, "win_rate": None,
+            "visibility": meta.get("visibility", "public"),
+            "owner": meta.get("owner"), "catalog": catalog,
+            **conduct[(agent, kind)],
+        })
     return rows

@@ -5,18 +5,60 @@
 export const DATAHUB_URL =
   process.env.NEXT_PUBLIC_DATAHUB_URL ?? "https://datahub.onenept.com";
 
+// Whether trust for this row can be computed honestly in the deployment that
+// produced it. "insufficient" needs more settled evidence and will get there;
+// "unscoreable" never will, because nothing here settles that kind of work.
+// Read this rather than verdict: the scoring engine reports an unscoreable row
+// as "insufficient settled claims", which promises a verdict that is not coming.
+export type ScoreState = "scored" | "insufficient" | "unscoreable";
+
 export type AgentRow = {
   agent_id: string;
   work_kind: string;
   trust: number | null;
   verdict: string | null;
+  score_state: ScoreState | null;
+  score_reason: string | null;
   n_settled: number | null;
   brier: number | null;
   win_rate: number | null;
+  // conduct: true without settlement, so present on every row
+  n_actions: number | null;
+  n_applied: number | null;
+  n_blocked: number | null;
+  n_held: number | null;
+  n_errored: number | null;
+  n_harmful: number | null;
+  n_warn: number | null;
+  n_entities: number | null;
+  clean_rate: number | null;
   visibility: string | null;
   owner: string | null;
   catalog: string | null;
 };
+
+// Only a scored row has earned a position. Everything else is listed, with its
+// reason shown, but never ranked: a rank implies a comparison we cannot make.
+export function isScored(a: AgentRow): boolean {
+  return a.score_state === "scored";
+}
+
+export function splitAgents(rows: AgentRow[]): {
+  ranked: AgentRow[];
+  observed: AgentRow[];
+} {
+  return {
+    ranked: rows.filter(isScored),
+    observed: rows.filter((a) => !isScored(a)),
+  };
+}
+
+export function scoreStateLabel(state: ScoreState | null): string {
+  if (state === "unscoreable") return "not scoreable here";
+  if (state === "insufficient") return "gathering evidence";
+  if (state === "scored") return "scored";
+  return "unrated";
+}
 
 export type ActivityRow = {
   id: number;

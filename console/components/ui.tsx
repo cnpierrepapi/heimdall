@@ -1,4 +1,11 @@
-import { Tone, verdictShort, verdictTone } from "../lib/view";
+import {
+  AgentRow,
+  ScoreState,
+  Tone,
+  scoreStateLabel,
+  verdictShort,
+  verdictTone,
+} from "../lib/view";
 
 /* The trust sigil: a rune-ring gauge. Arc length = trust score, tone sets the metal. */
 export function TrustRing({
@@ -146,5 +153,46 @@ export function EyeSigil({ size = 26 }: { size?: number }) {
       <circle cx="16" cy="16" r="5.4" stroke="var(--aurora)" strokeWidth="1.5" />
       <circle cx="16" cy="16" r="1.9" fill="var(--aurora)" />
     </svg>
+  );
+}
+
+/* Conduct: what an agent did, which is true whether or not it can be scored.
+   Blocked and harmful counts are flagged, since those are the ones worth reading. */
+export function ConductStrip({ agent }: { agent: AgentRow }) {
+  // Rows published before conduct was recorded carry zeroes rather than a real
+  // count. Rendering those as "0 actions" would state something we never
+  // measured, so a row with nothing observed shows nothing.
+  if (!agent.n_actions) return null;
+  const stats: [string, number][] = [
+    ["actions", agent.n_actions ?? 0],
+    ["applied", agent.n_applied ?? 0],
+    ["blocked", agent.n_blocked ?? 0],
+    ["held", agent.n_held ?? 0],
+    ["errored", agent.n_errored ?? 0],
+    ["harmful", agent.n_harmful ?? 0],
+    ["assets", agent.n_entities ?? 0],
+  ];
+  return (
+    <dl className="conduct">
+      {stats.map(([label, v]) => {
+        const flag = v > 0 && (label === "blocked" || label === "harmful");
+        return (
+          <div className={`conduct-cell${flag ? " is-flag" : ""}`} key={label}>
+            <dt>{label}</dt>
+            <dd className="mono">{v}</dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+
+/* Why a row carries no score. The two states differ in kind, not degree: one is
+   waiting for evidence, the other will never have any here. */
+export function ScoreStateTag({ state }: { state: ScoreState | null }) {
+  return (
+    <span className={`state-tag state-${state ?? "none"}`}>
+      {scoreStateLabel(state)}
+    </span>
   );
 }

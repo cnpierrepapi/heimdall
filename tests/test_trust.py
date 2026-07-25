@@ -77,9 +77,31 @@ def test_false_pii_grades_revert():
     assert g.work_kind == KIND_PII and g.correct is False
 
 
-def test_wrong_owner_grades_revert():
-    g = one(ev("add_owners", {"entity_urns": [ORDERS], "owner_urns": ["urn:li:corpGroup:marketing"]}))
-    assert g.work_kind == KIND_OWNER and g.correct is False
+def test_owner_writes_are_observed_but_never_settled():
+    """Ownership settles by steward review, which this deployment does not have.
+
+    The catalog does carry an owner, so it would be easy to grade a guess against
+    it. That is exactly the trap: the label was assigned, not derived, so nothing
+    the agent can read points to it and a correct guess is luck. The write is
+    still graded as a target (it is observed) but carries no outcome.
+    """
+    wrong = ev("add_owners", {"entity_urns": [ORDERS],
+                              "owner_urns": ["urn:li:corpGroup:marketing"]})
+    g = one(wrong)
+    assert g.work_kind == KIND_OWNER
+    assert g.correct is None, "an unscoreable kind must not bank a revert"
+
+    right = ev("add_owners", {"entity_urns": [ORDERS],
+                              "owner_urns": ["urn:li:corpGroup:data-platform"]})
+    assert one(right).correct is None, "nor an accept"
+
+
+def test_owner_violations_still_surface_as_findings():
+    """Withholding the score must not withhold the oversight."""
+    from heimdall.grounding import ground_event
+    wrong = ev("add_owners", {"entity_urns": [ORDERS],
+                              "owner_urns": ["urn:li:corpGroup:marketing"]})
+    assert ground_event(wrong, CTX), "a wrong owner is still caught and cited"
 
 
 def test_removal_and_reads_not_graded():

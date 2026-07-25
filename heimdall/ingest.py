@@ -115,8 +115,9 @@ def ingest_spec(spec: CatalogSpec, emitter: Any = None, gms_url: Optional[str] =
                 with_pii_tags: bool = True) -> int:
     """Emit the catalog into DataHub. Returns the number of MCPs sent.
 
-    PII tag entities are pre-created by default so a tagger's add_tags writes
-    reference an existing tag rather than dangling.
+    PII tag entities and the catalog's owning corpGroups are pre-created by
+    default, so a tagger's add_tags and an owner agent's add_owners reference
+    entities that exist rather than failing downstream of the gateway.
     """
     if emitter is None:
         import os
@@ -124,8 +125,9 @@ def ingest_spec(spec: CatalogSpec, emitter: Any = None, gms_url: Optional[str] =
         emitter = DatahubRestEmitter(gms_url or os.environ.get("DATAHUB_GMS_URL", "http://localhost:8080"))
     mcps = build_mcps(spec)
     if with_pii_tags:
-        from .governance import pii_tag_mcps
-        mcps = mcps + pii_tag_mcps()
+        from .governance import owner_group_mcps, pii_tag_mcps
+        teams = [d.owner for d in spec.datasets if d.owner]
+        mcps = mcps + pii_tag_mcps() + owner_group_mcps(teams)
     for mcp in mcps:
         emitter.emit(mcp)
     return len(mcps)

@@ -6,9 +6,15 @@ import pytest
 
 from heimdall.agentrun import build_agent
 from heimdall.agents.enricher import EnricherAgent
+from heimdall.agents.ownerrec import OwnerRecommenderAgent
 from heimdall.agents.piitagger import PiiTaggerAgent
 from heimdall.claims import ENRICHMENT, Claim
-from heimdall.governance import apply_claim, pii_tag_urn
+from heimdall.governance import (
+    TECHNICAL_OWNER,
+    apply_claim,
+    owner_urn,
+    pii_tag_urn,
+)
 from heimdall.roster import RosterAgent
 
 
@@ -38,9 +44,21 @@ def test_build_agent_maps_kind_to_writer():
     assert "meticulous" in doc.system
 
 
+def test_build_agent_wires_the_owner_recommender_with_candidates():
+    """Ownership is cast even though it can never be scored here: the actions are
+    still observed and a proposal against the catalog is still caught in flight."""
+    agent = build_agent(
+        RosterAgent("mira-owner", "owner", "diligent"), None, None,
+        teams=("data-platform", "commerce-analytics"),
+    )
+    assert isinstance(agent, OwnerRecommenderAgent)
+    assert agent.agent_id == "mira-owner"
+    assert agent.teams == ("data-platform", "commerce-analytics")
+
+
 def test_build_agent_rejects_unwired_kind():
     with pytest.raises(ValueError):
-        build_agent(RosterAgent("x", "owner", "diligent"), None, None)
+        build_agent(RosterAgent("x", "domain", "diligent"), None, None)
 
 
 def test_apply_column_doc_writes_description_with_column():
@@ -61,6 +79,18 @@ def test_apply_pii_writes_pii_tag():
     assert args["column_paths"] == ["email"]
 
 
+def test_apply_owner_assigns_the_team():
+    mcp = FakeMCP()
+    apply_claim(mcp, _claim("owner", owner="data-platform"))
+    tool, args = mcp.calls[0]
+    assert tool == "add_owners"
+    assert args["owner_urns"] == [owner_urn("data-platform")]
+    # required by the tool schema: without it MCP rejects the call before the
+    # gateway can observe it, so the write vanishes instead of being governed
+    assert args["ownership_type"] == TECHNICAL_OWNER
+
+
 def test_apply_rejects_unknown_kind():
+    """A new work kind must not be silently dropped on the floor."""
     with pytest.raises(ValueError):
-        apply_claim(FakeMCP(), _claim("owner", owner="team"))
+        apply_claim(FakeMCP(), _claim("domain", domain="Commerce"))

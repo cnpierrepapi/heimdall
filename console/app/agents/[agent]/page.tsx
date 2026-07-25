@@ -6,12 +6,15 @@ import {
   getAgents,
   getFindings,
   getViewer,
+  isScored,
   relativeTime,
   verdictTone,
   WORK_KIND_LABEL,
 } from "../../../lib/data";
 import {
+  ConductStrip,
   OpTag,
+  ScoreStateTag,
   SectionHead,
   StatusMark,
   TrustRing,
@@ -60,7 +63,7 @@ export default async function AgentPage({
         <dl className="report-vitals">
           <div>
             <dt>work kinds scored</dt>
-            <dd>{kinds.length}</dd>
+            <dd>{kinds.filter(isScored).length}</dd>
           </div>
           <div>
             <dt>claims settled</dt>
@@ -82,34 +85,49 @@ export default async function AgentPage({
       <div className="score-grid">
         {kinds.map((a) => {
           const priv = a.visibility === "private";
+          // A ring and a verdict both assert a measurement. Where nothing settles
+          // the claim there is no measurement to show, so the card carries the
+          // reason and the conduct record instead of an empty gauge.
+          const scored = isScored(a);
           return (
             <article className="panel score-card" key={a.work_kind}>
-              <TrustRing
-                value={a.trust}
-                tone={verdictTone(a.verdict)}
-                size={104}
-              />
+              {scored && (
+                <TrustRing
+                  value={a.trust}
+                  tone={verdictTone(a.verdict)}
+                  size={104}
+                />
+              )}
               <div className="score-body">
                 <h3 className="score-kind">{WORK_KIND_LABEL[a.work_kind] ?? a.work_kind}</h3>
-                <VerdictChip verdict={a.verdict} />
-                <dl className="score-stats">
-                  <div>
-                    <dt>settled</dt>
-                    <dd>{a.n_settled ?? 0}</dd>
-                  </div>
-                  {a.win_rate != null && (
+                {scored ? (
+                  <VerdictChip verdict={a.verdict} />
+                ) : (
+                  <ScoreStateTag state={a.score_state} />
+                )}
+                {scored ? (
+                  <dl className="score-stats">
                     <div>
-                      <dt>win rate</dt>
-                      <dd>{Math.round(a.win_rate * 100)}%</dd>
+                      <dt>settled</dt>
+                      <dd>{a.n_settled ?? 0}</dd>
                     </div>
-                  )}
-                  {a.brier != null && (
-                    <div>
-                      <dt>brier</dt>
-                      <dd>{a.brier.toFixed(2)}</dd>
-                    </div>
-                  )}
-                </dl>
+                    {a.win_rate != null && (
+                      <div>
+                        <dt>win rate</dt>
+                        <dd>{Math.round(a.win_rate * 100)}%</dd>
+                      </div>
+                    )}
+                    {a.brier != null && (
+                      <div>
+                        <dt>brier</dt>
+                        <dd>{a.brier.toFixed(2)}</dd>
+                      </div>
+                    )}
+                  </dl>
+                ) : (
+                  a.score_reason && <p className="observed-why">{a.score_reason}</p>
+                )}
+                <ConductStrip agent={a} />
                 {priv && (
                   <span className="lock-tag">
                     <span aria-hidden="true">{"◈"}</span> private to your tenant
