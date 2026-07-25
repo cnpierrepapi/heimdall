@@ -9,7 +9,12 @@ from heimdall.agents.enricher import EnricherAgent
 from heimdall.agents.ownerrec import OwnerRecommenderAgent
 from heimdall.agents.piitagger import PiiTaggerAgent
 from heimdall.claims import ENRICHMENT, Claim
-from heimdall.governance import apply_claim, owner_urn, pii_tag_urn
+from heimdall.governance import (
+    TECHNICAL_OWNER,
+    apply_claim,
+    owner_urn,
+    pii_tag_urn,
+)
 from heimdall.roster import RosterAgent
 
 
@@ -80,6 +85,9 @@ def test_apply_owner_assigns_the_team():
     tool, args = mcp.calls[0]
     assert tool == "add_owners"
     assert args["owner_urns"] == [owner_urn("data-platform")]
+    # required by the tool schema: without it MCP rejects the call before the
+    # gateway can observe it, so the write vanishes instead of being governed
+    assert args["ownership_type"] == TECHNICAL_OWNER
 
 
 def test_apply_rejects_unknown_kind():

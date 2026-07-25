@@ -20,6 +20,10 @@ def pii_tag_urn(pii_type: str) -> str:
     return f"urn:li:tag:pii-{pii_type.replace('_', '-')}"
 
 
+# the ownership flavour an agent assigns; the tool schema requires one
+TECHNICAL_OWNER = "__system__technical_owner"
+
+
 def owner_urn(team: str) -> str:
     """Owner urn for a team name. Grounding reads the last segment back out."""
     return f"urn:li:corpGroup:{team}"
@@ -64,9 +68,12 @@ def apply_claim(mcp: Any, claim: Any) -> str:
         })
         return f"tag {pred['pii_type']} on {pred['column']}"
     if kind == "owner":
+        # ownership_type is required by the tool schema; omitting it gets the call
+        # rejected by MCP validation before the gateway ever sees it.
         mcp.call("add_owners", {
             "entity_urns": [claim.entity_urn],
             "owner_urns": [owner_urn(pred["owner"])],
+            "ownership_type": TECHNICAL_OWNER,
         })
         return f"assign owner {pred['owner']}"
     raise ValueError(f"apply_claim: unsupported kind {kind!r}")
