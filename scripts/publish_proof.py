@@ -7,7 +7,8 @@ and hard-deletes the catalog it created, so the live console is not polluted
 before the engine's real activation.
 
 Run on the box:
-    source ~/.heimdall/env && ~/fresh-e2e/v/bin/python scripts/publish_proof.py
+    set -a; . ~/.heimdall/env; set +a
+    ~/fresh-e2e/v/bin/python scripts/publish_proof.py
 """
 
 from __future__ import annotations

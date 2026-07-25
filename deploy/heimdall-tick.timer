@@ -1,0 +1,17 @@
+[Unit]
+Description=Run the Heimdall engine tick every 15 minutes
+Documentation=https://github.com/cnpierrepapi/heimdall
+
+[Timer]
+# Fire at :00, :15, :30, :45 so the console's feed lands on a predictable cadence.
+OnCalendar=*:0/15
+# Catch up after a reboot or a stopped instance rather than waiting for the
+# next slot, so the console refreshes as soon as the box is back.
+Persistent=true
+# Stagger slightly: a fleet of timers firing on the exact minute is a thundering herd.
+RandomizedDelaySec=30
+AccuracySec=10s
+Unit=heimdall-tick.service
+
+[Install]
+WantedBy=timers.target

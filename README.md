@@ -92,8 +92,20 @@ heimdall/          the package
   writeback.py       projects trust and dossiers back into DataHub
   snapshot.py        builds the console projection
   simulator/         the demo world and its ground truth
+
+  the living catalog engine, which keeps the console current:
+  generator.py       seeded catalog generator over a twelve theme library
+  catalog.py         portable catalog specs and their ground truth
+  ingest.py          ingest a generated catalog into DataHub, and collect it
+  roster.py          the stable cast of agents; agentrun.py runs one of them
+  budget.py          spend ledger, hard cap, and the activation gate
+  engine.py          one tick: generate, cast, ground, settle, project
+  publisher.py       writes a tick's rows to the console database
+  scheduler.py       the scheduled run: cut over once, publish, log
+
 examples/          the end-to-end walkthrough
 scripts/           runnable stages and proofs
+deploy/            systemd units and the operating runbook for the engine
 console/           the Next.js console
 tests/             the test suite
 ```

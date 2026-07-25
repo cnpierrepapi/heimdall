@@ -1,0 +1,32 @@
+[Unit]
+Description=Heimdall living catalog engine tick
+Documentation=https://github.com/cnpierrepapi/heimdall
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Paths match the reference deployment. Adjust User and the three paths below to
+# your own account, checkout, and virtualenv.
+User=ec2-user
+WorkingDirectory=/home/ec2-user/fresh-e2e/heimdall
+EnvironmentFile=/home/ec2-user/.heimdall/env
+ExecStart=/home/ec2-user/fresh-e2e/v/bin/python scripts/engine_tick.py
+
+# A tick casts several LLM agents through the gateway. Cap it well under the
+# timer interval so a wedged run cannot pile up behind the next one.
+TimeoutStartSec=600
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=heimdall-tick
+
+# The engine only needs its own home, the repo, and the network.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ec2-user/.heimdall
+
+[Install]
+WantedBy=multi-user.target
