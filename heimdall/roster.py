@@ -23,12 +23,14 @@ from dataclasses import dataclass
 
 from .catalog import CatalogSpec
 
-# work kinds an agent can be responsible for (match the trust engine's kinds)
-KIND_COLUMN_DOC = "column_doc"
-KIND_PII = "pii"
-KIND_OWNER = "owner"
-KIND_DOMAIN = "domain"
-KIND_TERM = "term"
+# work kinds an agent can be responsible for, declared once in workkinds
+from .workkinds import (  # noqa: E402
+    KIND_COLUMN_DOC,
+    KIND_DOMAIN,
+    KIND_OWNER,
+    KIND_PII,
+    KIND_TERM,
+)
 
 DILIGENT = "diligent"
 HASTY = "hasty"
