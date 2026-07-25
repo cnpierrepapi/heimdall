@@ -60,8 +60,8 @@ lineage, and schemas are real catalog entities.
 python scripts/run_agents_demo.py
 ```
 
-Four agents work the catalog through DataHub MCP: the blast-radius
-forecaster, the freshness sentinel, the enricher, and incident triage. Every
+Three agents work the catalog through DataHub MCP: the freshness sentinel,
+the enricher, and incident triage. Every
 action is recorded as a claim with stated confidence, ground truth events
 settle them, and the run ends with a per-agent skill report (win rate,
 Brier, skill-vs-luck verdict, trust).

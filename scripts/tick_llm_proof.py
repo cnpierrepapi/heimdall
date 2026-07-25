@@ -30,7 +30,6 @@ from heimdall.mcp_client import DataHubMCP
 from heimdall.observability import EventStore
 from heimdall.roster import PROFILE_SYSTEMS
 from heimdall.simulator.steward import KIND_COLUMN_DOC
-from heimdall.skill import HARMFUL, SKILLED
 from heimdall.trust import score_events
 
 GMS = os.environ.get("DATAHUB_GMS_URL", "http://localhost:8080")

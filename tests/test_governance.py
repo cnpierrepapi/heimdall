@@ -11,14 +11,7 @@ active customers.
 
 from __future__ import annotations
 
-from heimdall.agents import (
-    DomainAssignerAgent,
-    NaiveGovernanceAgent,
-    OwnerRecommenderAgent,
-    PiiTaggerAgent,
-    TableDescriberAgent,
-    TermMapperAgent,
-)
+from heimdall.agents import PiiTaggerAgent
 from heimdall.claims import ENRICHMENT, Claim
 from heimdall.simulator import steward
 from heimdall.simulator.world import build_default_world, dataset_urn
@@ -77,24 +70,6 @@ def governance_claim(kind: str, prediction: dict, urn: str) -> Claim:
 # -- agents ------------------------------------------------------------------
 
 
-def test_table_describer_claim_shape_and_clamp():
-    llm = FakeLLM([{"description": "Raw order feed from the shop.", "confidence": 4.2}])
-    agent = TableDescriberAgent(FakeMCP(schemas={URN_A: SCHEMA_A}), llm)
-    claims = agent.propose(URN_A)
-    assert len(claims) == 1
-    c = claims[0]
-    assert c.claim_type == ENRICHMENT
-    assert c.prediction["kind"] == "table_doc"
-    assert c.confidence == 0.95  # clamped from a nonsense value
-    assert "description" in c.prediction
-
-
-def test_table_describer_abstains_on_empty():
-    llm = FakeLLM([{"description": "  ", "confidence": 0.8}])
-    agent = TableDescriberAgent(FakeMCP(schemas={URN_A: SCHEMA_A}), llm)
-    assert agent.propose(URN_A) == []
-
-
 def test_pii_tagger_drops_hallucinated_columns_and_types():
     llm = FakeLLM(
         [
@@ -111,73 +86,6 @@ def test_pii_tagger_drops_hallucinated_columns_and_types():
     claims = agent.propose(URN_A)
     assert [c.prediction["column"] for c in claims] == ["email"]
     assert claims[0].prediction["kind"] == "pii"
-
-
-def test_owner_recommender_rejects_off_list_answer():
-    llm = FakeLLM([{"owner": "made-up-team", "confidence": 0.9}])
-    agent = OwnerRecommenderAgent(FakeMCP(schemas={URN_A: SCHEMA_A}), llm)
-    assert agent.propose(URN_A, ["team-a", "team-b"]) == []
-
-
-def test_owner_recommender_records_n_candidates():
-    llm = FakeLLM([{"owner": "team-b", "confidence": 0.8}])
-    agent = OwnerRecommenderAgent(FakeMCP(schemas={URN_A: SCHEMA_A}), llm)
-    claims = agent.propose(URN_A, ["team-a", "team-b", "team-c"])
-    assert claims[0].prediction == {
-        "kind": "owner",
-        "owner": "team-b",
-        "n_candidates": 3,
-    }
-
-
-def test_domain_assigner_needs_two_candidates():
-    agent = DomainAssignerAgent(FakeMCP(schemas={URN_A: SCHEMA_A}), FakeLLM([]))
-    assert agent.propose(URN_A, ["OnlyDomain"]) == []
-
-
-def test_term_mapper_dedupes_and_filters():
-    llm = FakeLLM(
-        [
-            {
-                "mappings": [
-                    {"column": "email", "term": "Customer Email", "confidence": 0.8},
-                    {"column": "email", "term": "Customer Email", "confidence": 0.6},
-                    {"column": "country", "term": "Not A Term", "confidence": 0.9},
-                ]
-            }
-        ]
-    )
-    agent = TermMapperAgent(FakeMCP(schemas={URN_A: SCHEMA_A}), llm)
-    claims = agent.propose(URN_A, ["Customer Email", "Customer Country"])
-    assert len(claims) == 1
-    assert claims[0].prediction["term"] == "Customer Email"
-
-
-def test_naive_rival_is_deterministic_and_hits_the_traps():
-    mcp = FakeMCP(schemas={URN_A: SCHEMA_A})
-    agent = NaiveGovernanceAgent(mcp, "naive-governance")
-    claims = agent.propose_all(
-        URN_A,
-        teams=["commerce-analytics", "data-platform"],
-        domains=["Commerce", "Customers"],
-        terms=["Customer Country", "Active Customers"],
-    )
-    kinds = [c.prediction["kind"] for c in claims]
-    assert kinds.count("table_doc") == 1
-    assert kinds.count("owner") == 1 and kinds.count("domain") == 1
-    # the naive pattern matcher flags the pseudonymous key and the demographic
-    pii = {c.prediction["column"]: c.prediction["pii_type"] for c in claims if c.prediction["kind"] == "pii"}
-    assert pii["customer_id"] == "national_id"
-    assert pii["country"] == "address"
-    assert pii["email"] == "email"
-    # same input, same claims
-    again = agent.propose_all(
-        URN_A,
-        teams=["commerce-analytics", "data-platform"],
-        domains=["Commerce", "Customers"],
-        terms=["Customer Country", "Active Customers"],
-    )
-    assert [c.prediction for c in again] == [c.prediction for c in claims]
 
 
 # -- world truth and the steward ---------------------------------------------

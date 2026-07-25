@@ -11,7 +11,6 @@ from heimdall.grounding import (
     CHECK_WRONG_OWNER,
     SEV_HARMFUL,
     SEV_WARN,
-    Finding,
     FindingStore,
     WorldCatalogContext,
     ground_event,

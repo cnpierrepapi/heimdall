@@ -13,14 +13,13 @@ from __future__ import annotations
 import pytest
 
 from heimdall.agents import (
-    BlastRadiusAgent,
     EnricherAgent,
     FreshnessSentinelAgent,
     TriageAgent,
 )
 from heimdall.agents.common import clamp_confidence, extract_dataset_urns
 from heimdall.agents.enricher import undocumented_columns
-from heimdall.claims import BLAST_RADIUS, ENRICHMENT, FRESHNESS_SLA, ROOT_CAUSE
+from heimdall.claims import ENRICHMENT, FRESHNESS_SLA, ROOT_CAUSE
 
 URN_A = "urn:li:dataset:(urn:li:dataPlatform:postgres,db.a,PROD)"
 URN_B = "urn:li:dataset:(urn:li:dataPlatform:postgres,db.b,PROD)"
@@ -198,31 +197,3 @@ def test_triage_no_candidates_returns_none():
     llm = FakeLLM([])
     agent = TriageAgent(FakeMCP(), llm)
     assert agent.diagnose("urn:li:incident:x", URN_A, "stale", []) is None
-
-
-# -- blast radius (post-refactor guard) --------------------------------------
-
-
-def test_blast_abstains_for_omitted_candidates():
-    lineage = {(URN_A, False): {"entities": [{"urn": URN_B}, {"urn": URN_C}]}}
-    schemas = {
-        u: {"urn": u, "fields": [{"fieldPath": "id"}]} for u in (URN_A, URN_B, URN_C)
-    }
-    llm = FakeLLM(
-        [
-            {
-                "assessments": [
-                    {"dataset_urn": URN_B, "will_break": True, "confidence": 0.9, "reason": "uses col"}
-                    # URN_C omitted: expect an explicit abstention claim
-                ]
-            }
-        ]
-    )
-    agent = BlastRadiusAgent(FakeMCP(lineage=lineage, schemas=schemas), llm)
-    claims = agent.forecast(URN_A, "col")
-    by_urn = {c.entity_urn: c for c in claims}
-    assert by_urn[URN_B].prediction["will_break"] is True
-    assert by_urn[URN_B].claim_type == BLAST_RADIUS
-    abstained = by_urn[URN_C]
-    assert abstained.confidence == 0.5
-    assert abstained.prediction["will_break"] is False

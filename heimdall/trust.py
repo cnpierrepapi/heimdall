@@ -18,7 +18,7 @@ rate as the luck baseline (beating that, not a coin flip, is what earns
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
 from .claims import ENRICHMENT, Claim, ClaimStore
 from .grounding import (

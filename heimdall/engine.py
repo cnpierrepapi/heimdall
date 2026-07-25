@@ -28,7 +28,7 @@ from typing import Any, Optional
 
 from .agentrun import RunStat, run_roster_agent
 from .budget import SpendLedger, can_run, tick_subcap
-from .catalog import CatalogSpec, load_spec, save_spec, spec_to_world
+from .catalog import load_spec, save_spec, spec_to_world
 from .claims import ClaimStore
 from .generator import generate_catalog
 from .grounding import FindingStore, WorldCatalogContext, ground_events
@@ -37,7 +37,7 @@ from .mcp_client import DataHubMCP
 from .observability import EventStore
 from .roster import CASTABLE_KINDS, KIND_PII, ROGUE, ROSTER, cast
 from .snapshot import activity_rows, agents_rows, findings_rows
-from .trust import settle_observations, trust_report
+from .trust import settle_observations
 
 SHOWCASE = "showcase"
 

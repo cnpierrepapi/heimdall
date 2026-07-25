@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from heimdall.claims import BLAST_RADIUS, ENRICHMENT, Claim, ClaimStore
 from heimdall.skill import HARMFUL, LUCK, SKILLED, UNSETTLED
 from heimdall.writeback import (
@@ -77,9 +75,7 @@ def test_apply_accepted_enrichments_filters(tmp_path):
     reverted = store.record(
         _claim(ENRICHMENT, URN_B, column="c2", description="Filler text.")
     )
-    unsettled = store.record(
-        _claim(ENRICHMENT, URN_B, column="c3", description="Never reviewed.")
-    )
+    store.record(_claim(ENRICHMENT, URN_B, column="c3", description="Never reviewed."))
     blast = store.record(_claim(BLAST_RADIUS, URN_A, will_break=True))
     store.settle(accepted.claim_id, outcome={}, correct=True)
     store.settle(reverted.claim_id, outcome={}, correct=False)

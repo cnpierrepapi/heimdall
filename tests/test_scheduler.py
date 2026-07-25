@@ -9,8 +9,6 @@ is the whole reason the engine runs on a schedule rather than once.
 
 from __future__ import annotations
 
-import pytest
-
 from heimdall.claims import ClaimStore
 from heimdall.engine import EngineConfig, TickResult
 from heimdall.grounding import WorldCatalogContext
