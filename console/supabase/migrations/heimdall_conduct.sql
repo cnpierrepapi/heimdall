@@ -17,6 +17,7 @@ alter table hd_agents
   add column if not exists n_applied  integer default 0,
   add column if not exists n_blocked  integer default 0,
   add column if not exists n_held     integer default 0,
+  add column if not exists n_errored  integer default 0,
   add column if not exists n_harmful  integer default 0,
   add column if not exists n_warn     integer default 0,
   add column if not exists n_entities integer default 0,

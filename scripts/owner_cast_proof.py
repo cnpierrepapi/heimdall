@@ -118,8 +118,12 @@ def main() -> int:
     check("owner rows are marked unscoreable",
           bool(owner_rows) and all(r["score_state"] == UNSCOREABLE for r in owner_rows),
           f"{len(owner_rows)} rows")
-    check("and carry a conduct record instead of a score",
-          all(r["trust"] is None and r.get("n_actions", 0) > 0 for r in owner_rows))
+    # unscoreable claims are still recorded, so the skill engine reports the
+    # untouched neutral prior rather than nothing at all. What must be true is
+    # that no evidence moved it and that conduct is there in its place.
+    check("and carry a conduct record instead of an earned score",
+          all(r["n_settled"] == 0 and r["trust"] in (None, 50.0)
+              and r.get("n_actions", 0) > 0 for r in owner_rows))
     if owner_rows:
         print(f"    reason: {owner_rows[0]['score_reason']}")
 

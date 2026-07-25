@@ -82,6 +82,7 @@ create table if not exists hd_agents (
   n_applied  integer default 0,
   n_blocked  integer default 0,
   n_held     integer default 0,
+  n_errored  integer default 0,
   n_harmful  integer default 0,
   n_warn     integer default 0,
   n_entities integer default 0,

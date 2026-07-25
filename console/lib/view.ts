@@ -27,6 +27,7 @@ export type AgentRow = {
   n_applied: number | null;
   n_blocked: number | null;
   n_held: number | null;
+  n_errored: number | null;
   n_harmful: number | null;
   n_warn: number | null;
   n_entities: number | null;

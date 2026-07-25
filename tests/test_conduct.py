@@ -148,5 +148,16 @@ def test_conduct_rows_emit_the_columns_hd_agents_carries():
     row = rows[("atlas", KIND_COLUMN_DOC)]
     assert row["n_actions"] == 2 and row["n_applied"] == 2
     assert row["n_entities"] == 2, "distinct entities touched, not action count"
-    assert set(row) == {"n_actions", "n_applied", "n_blocked", "n_held",
+    assert set(row) == {"n_actions", "n_applied", "n_blocked", "n_held", "n_errored",
                         "n_harmful", "n_warn", "n_entities", "clean_rate"}
+
+
+def test_a_write_that_failed_downstream_is_not_counted_as_applied():
+    """DataHub can reject a write the gateway already observed and forwarded.
+
+    Calling that "applied" would report a catalog change that never happened.
+    """
+    events = [doc("nyx", ts=1.0), doc("nyx", status="error", ts=2.0)]
+    rec = conduct_by_kind(events)[("nyx", KIND_COLUMN_DOC)]
+    assert rec.actions == 2 and rec.applied == 1 and rec.errored == 1
+    assert rec.clean_rate == 0.5

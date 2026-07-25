@@ -168,6 +168,7 @@ export function ConductStrip({ agent }: { agent: AgentRow }) {
     ["applied", agent.n_applied ?? 0],
     ["blocked", agent.n_blocked ?? 0],
     ["held", agent.n_held ?? 0],
+    ["errored", agent.n_errored ?? 0],
     ["harmful", agent.n_harmful ?? 0],
     ["assets", agent.n_entities ?? 0],
   ];

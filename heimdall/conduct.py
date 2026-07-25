@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 from .grounding import SEV_HARMFUL, SEV_WARN, Finding
-from .observability import BLOCKED, HELD, WRITE, ObservationEvent
+from .observability import BLOCKED, HELD, OK, WRITE, ObservationEvent
 from .trust import event_work_kinds
 
 
@@ -35,9 +35,10 @@ class Conduct:
     agent_id: str
     work_kind: str
     actions: int = 0        # writes of this kind the agent attempted
-    applied: int = 0        # ... that the gateway let through
-    blocked: int = 0        # ... that it refused outright
+    applied: int = 0        # ... that landed
+    blocked: int = 0        # ... that the gateway refused outright
     held: int = 0           # ... that it held for review
+    errored: int = 0        # ... that it forwarded but that failed downstream
     harmful: int = 0        # grounded findings of harmful severity
     warn: int = 0           # grounded findings of warn severity
     entities: set[str] = field(default_factory=set)
@@ -47,7 +48,7 @@ class Conduct:
         """Share of attempts that drew no finding and were not stopped."""
         if not self.actions:
             return None
-        bad = self.harmful + self.warn + self.blocked + self.held
+        bad = self.harmful + self.warn + self.blocked + self.held + self.errored
         return round(max(0.0, (self.actions - bad)) / self.actions, 3)
 
     def as_row(self) -> dict[str, Any]:
@@ -56,6 +57,7 @@ class Conduct:
             "n_applied": self.applied,
             "n_blocked": self.blocked,
             "n_held": self.held,
+            "n_errored": self.errored,
             "n_harmful": self.harmful,
             "n_warn": self.warn,
             "n_entities": len(self.entities),
@@ -91,8 +93,12 @@ def conduct_by_kind(
                 c.blocked += 1
             elif e.status == HELD:
                 c.held += 1
-            else:
+            elif e.status == OK:
                 c.applied += 1
+            else:
+                # forwarded, observed, then rejected downstream. Counting it as
+                # applied would say the catalog changed when it did not.
+                c.errored += 1
             c.entities.update(e.entities)
 
     for f in findings:

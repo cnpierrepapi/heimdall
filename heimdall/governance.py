@@ -45,6 +45,25 @@ def pii_tag_mcps() -> list[Any]:
     ]
 
 
+def owner_group_mcps(teams: Any) -> list[Any]:
+    """MCPs pre-creating the corpGroups an owner agent may assign.
+
+    DataHub refuses to assign ownership to a group that does not exist, and the
+    refusal happens downstream of the gateway: the call is observed and then
+    fails, so the agent looks like it acted when nothing landed. Creating the
+    catalog's teams up front keeps the assignment a real write.
+    """
+    from datahub.emitter.mcp import MetadataChangeProposalWrapper
+    from datahub.metadata.schema_classes import CorpGroupInfoClass
+    return [
+        MetadataChangeProposalWrapper(
+            entityUrn=owner_urn(team),
+            aspect=CorpGroupInfoClass(displayName=team, admins=[], members=[], groups=[]),
+        )
+        for team in sorted(set(teams))
+    ]
+
+
 def apply_claim(mcp: Any, claim: Any) -> str:
     """Project one accepted claim into the catalog through the gateway.
 
