@@ -271,7 +271,9 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
                              catalog=spec.catalog, since_ts=tick_start)
     with FindingStore(cfg.findings_db) as fs:
         findings = findings_rows(fs, owner=cfg.owner, catalog=spec.catalog, since_ts=tick_start)
-    agents = agents_rows(trust_store, registry=registry(), catalog=spec.catalog)
+        # conduct spans all history, like trust: both are the accumulated record
+        agents = agents_rows(trust_store, registry=registry(), catalog=spec.catalog,
+                             event_store=EventStore(cfg.events_db), finding_store=fs)
 
     gc = _retention_gc(cfg, keep_catalog=spec.catalog)
 

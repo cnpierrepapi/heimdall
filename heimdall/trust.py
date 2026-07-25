@@ -74,6 +74,20 @@ def _targets(action) -> list[tuple[str, Optional[str]]]:
     return []
 
 
+def event_work_kinds(event: ObservationEvent) -> set[str]:
+    """Which kinds of work one observed write asserts.
+
+    Needed without a catalog in hand: conduct is recorded for actions that were
+    blocked before they could be grounded, and for kinds nothing here can settle.
+    """
+    if event.op != WRITE:
+        return set()
+    action = parse_action(event)
+    if action.tool.startswith("remove_") or action.operation == "remove":
+        return set()
+    return {kind for kind, _ in _targets(action)}
+
+
 def _gradeable(kind: str, dataset: str, column: Optional[str], ctx: CatalogContext) -> bool:
     """Is there catalog truth to judge a clean write of this kind against?
 

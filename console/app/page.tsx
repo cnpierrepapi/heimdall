@@ -11,10 +11,13 @@ import {
   getViewer,
   relativeTime,
   verdictTone,
+  splitAgents,
   WORK_KIND_LABEL,
 } from "../lib/data";
 import {
+  ConductStrip,
   OpTag,
+  ScoreStateTag,
   SectionHead,
   StatusMark,
   TrustRing,
@@ -68,6 +71,8 @@ function Activity({ activity }: { activity: ActivityRow[] }) {
   );
 }
 
+// Only agents whose work this deployment can settle appear here. The rest are
+// listed by Observed below, with the reason they carry no score.
 function Leaderboard({ agents }: { agents: AgentRow[] }) {
   const kinds = Array.from(new Set(agents.map((a) => a.work_kind)));
   return (
@@ -128,6 +133,45 @@ function Leaderboard({ agents }: { agents: AgentRow[] }) {
   );
 }
 
+// Agents carrying no score, and why. Two different reasons live here and the
+// difference matters: one is waiting for evidence, the other will never have
+// any. Neither is ranked, because a rank claims a comparison we have not earned.
+// What they do have is a conduct record, which needs no settlement to be true.
+function Observed({ agents }: { agents: AgentRow[] }) {
+  if (agents.length === 0) return null;
+  const order = { unscoreable: 0, insufficient: 1 } as Record<string, number>;
+  const rows = [...agents].sort(
+    (x, y) =>
+      (order[x.score_state ?? ""] ?? 2) - (order[y.score_state ?? ""] ?? 2) ||
+      (y.n_actions ?? 0) - (x.n_actions ?? 0),
+  );
+  return (
+    <section className="panel observed" aria-label="Observed, not scored">
+      <p className="observed-lede">
+        Heimdall watches these agents and grounds every action they take. It does not
+        rank them: a trust score is only honest where something settles the claim.
+      </p>
+      <ul className="observed-list">
+        {rows.map((a) => (
+          <li className="observed-row" key={a.agent_id + a.work_kind}>
+            <div className="observed-who">
+              <a className="agent-id" href={`/agents/${encodeURIComponent(a.agent_id)}`}>
+                {a.agent_id}
+              </a>
+              <span className="observed-kind">
+                {WORK_KIND_LABEL[a.work_kind] ?? a.work_kind}
+              </span>
+              <ScoreStateTag state={a.score_state} />
+            </div>
+            {a.score_reason && <p className="observed-why">{a.score_reason}</p>}
+            <ConductStrip agent={a} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function Findings({ findings }: { findings: FindingRow[] }) {
   return (
     <div className="findings-grid">
@@ -177,6 +221,7 @@ export default async function Home() {
     getFindings(viewer.owner),
   ]);
 
+  const { ranked, observed } = splitAgents(agents);
   const distinctAgents = new Set(agents.map((a) => a.agent_id)).size;
   const harmful = findings.filter((f) => f.severity === "harmful").length;
   const stopped = activity.filter((e) => e.status === "blocked" || e.status === "held").length;
@@ -262,12 +307,24 @@ export default async function Home() {
             title="Leaderboard"
             note="trust by work kind"
           />
-          <Leaderboard agents={agents} />
+          <Leaderboard agents={ranked} />
         </div>
       </div>
 
+      {observed.length > 0 && (
+        <>
+          <SectionHead
+            index="03"
+            id="observed"
+            title="Observed, not scored"
+            note="watched and grounded, but not ranked"
+          />
+          <Observed agents={observed} />
+        </>
+      )}
+
       <SectionHead
-        index="03"
+        index={observed.length > 0 ? "04" : "03"}
         id="findings"
         title="Catalog-grounded findings"
         note="each verdict cites the catalog itself"

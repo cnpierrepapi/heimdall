@@ -76,6 +76,16 @@ create table if not exists hd_agents (
   n_settled  integer default 0,
   brier      numeric,
   win_rate   numeric,
+  -- Conduct: what the agent did, which needs no settlement to be true. Present
+  -- for every agent, including those whose work cannot be scored here.
+  n_actions  integer default 0,
+  n_applied  integer default 0,
+  n_blocked  integer default 0,
+  n_held     integer default 0,
+  n_harmful  integer default 0,
+  n_warn     integer default 0,
+  n_entities integer default 0,
+  clean_rate numeric,
   visibility text not null default 'public'
              check (visibility in ('public', 'private')),
   owner      text,
