@@ -20,6 +20,11 @@ def pii_tag_urn(pii_type: str) -> str:
     return f"urn:li:tag:pii-{pii_type.replace('_', '-')}"
 
 
+def owner_urn(team: str) -> str:
+    """Owner urn for a team name. Grounding reads the last segment back out."""
+    return f"urn:li:corpGroup:{team}"
+
+
 def pii_tag_mcps() -> list[Any]:
     """MCPs pre-creating the PII tag entities a tagger may reference."""
     from datahub.emitter.mcp import MetadataChangeProposalWrapper
@@ -58,4 +63,10 @@ def apply_claim(mcp: Any, claim: Any) -> str:
             "column_paths": [pred["column"]],
         })
         return f"tag {pred['pii_type']} on {pred['column']}"
+    if kind == "owner":
+        mcp.call("add_owners", {
+            "entity_urns": [claim.entity_urn],
+            "owner_urns": [owner_urn(pred["owner"])],
+        })
+        return f"assign owner {pred['owner']}"
     raise ValueError(f"apply_claim: unsupported kind {kind!r}")
