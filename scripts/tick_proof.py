@@ -78,12 +78,15 @@ def main() -> int:
         print(f"  [{'PASS' if passed else 'FAIL'}] {label}")
         ok = ok and passed
 
-    # cleanup: hard-delete the catalog this proof created, drop the scratch home
+    # cleanup: hard-delete the world this proof created, drop the scratch home.
+    # the spec lives in the worlds directory, not the retention directory
     if res.ok and res.catalog:
-        spec_path = os.path.join(cfg.spec_dir, f"{res.catalog}.json")
+        spec_path = os.path.join(cfg.worlds_dir, f"{res.catalog}.json")
         if os.path.exists(spec_path):
             gone = sum(1 for r in hard_delete_catalog(load_spec(spec_path), gms_url=cfg.gms_url) if r.ok)
             print(f"\ncleanup: deleted {gone} datasets from {res.catalog}")
+        else:
+            print(f"\ncleanup: WARNING no spec at {spec_path}, {res.catalog} left in DataHub")
     shutil.rmtree(home, ignore_errors=True)
 
     print(f"\nRESULT: {'PASS' if ok else 'FAIL'}")
