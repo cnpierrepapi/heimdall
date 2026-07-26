@@ -52,6 +52,7 @@ class CatalogContext(Protocol):
 
     def dataset_name(self, urn: str) -> Optional[str]: ...
     def columns(self, dataset: str) -> list[str]: ...
+    def column_description(self, dataset: str, column: str) -> Optional[str]: ...
     def column_pii(self, dataset: str, column: str) -> Optional[str]: ...
     def column_term(self, dataset: str, column: str) -> Optional[str]: ...
     def column_gold_keywords(self, dataset: str, column: str) -> tuple[str, ...]: ...
@@ -75,6 +76,16 @@ class WorldCatalogContext:
     def columns(self, dataset: str) -> list[str]:
         ds = self.world.datasets.get(dataset)
         return [c.name for c in ds.columns] if ds else []
+
+    def column_description(self, dataset: str, column: str) -> Optional[str]:
+        """The description the catalog carries now. None means undocumented.
+
+        Read from the world, so it reflects what the catalog shipped with and any
+        mutation since, not what agents have written into DataHub. Scoring uses it
+        to tell a new artifact from one that already had an answer.
+        """
+        col = self.world.column(dataset, column)
+        return col.description if col else None
 
     def column_pii(self, dataset: str, column: str) -> Optional[str]:
         return self.world.pii_type(dataset, column)

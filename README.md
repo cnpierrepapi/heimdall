@@ -22,7 +22,7 @@ Generic agent tracers (Langfuse, Arize, Fiddler) watch prompts, tokens, and late
 
 - **Observability gateway**: a drop in MCP proxy that mirrors DataHub's MCP tools and captures every call as a structured observation event.
 - **Grounded evaluators**: per action checks against catalog context that emit specific, cited findings.
-- **Trust engine**: settled outcomes accumulate into per agent, per work kind reliability scores with calibration and a skill versus luck verdict.
+- **Trust engine**: settled outcomes accumulate into per agent, per work kind reliability scores with calibration and a skill versus luck verdict. Only work on a new artifact is scored, so an agent cannot bank the same judgment call twice by rewriting metadata a column already carried.
 - **Policy layer**: threshold routing at the gateway (auto accept, hold, block).
 - **Writeback**: trust tags, structured properties, and agent dossiers projected back into DataHub.
 - **Console**: a live activity feed, per agent trust, grounded findings, leaderboard, and policy actions.

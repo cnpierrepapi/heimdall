@@ -9,8 +9,10 @@ from heimdall.simulator.steward import KIND_COLUMN_DOC, KIND_OWNER, KIND_PII
 from heimdall.simulator.world import build_default_world
 from heimdall.skill import HARMFUL, SKILLED
 from heimdall.trust import (
+    SurfaceLedger,
     agent_profile,
     best_agent_per_kind,
+    composite_id,
     graded_targets,
     hd_agents_rows,
     leaderboard,
@@ -215,3 +217,178 @@ def test_agent_profile_spans_kinds(tmp_path):
     settle_observations(events, CTX, store)
     profile = agent_profile(store, "good-agent")
     assert KIND_COLUMN_DOC in profile
+
+
+# -- new artifacts only -------------------------------------------------------
+#
+# Scoring counts work on artifacts that were new when the agent reached them.
+# These lock the two halves of that: what the catalog already carried, and what
+# had already been written by the time the day began.
+
+
+def _tiny_ctx(described: bool):
+    """A one-column catalog whose single gold column is documented or not."""
+    from heimdall.catalog import CatalogSpec, ColumnSpec, DatasetSpec, spec_to_world
+    spec = CatalogSpec(
+        catalog="hcatalog_test",
+        theme="test",
+        datasets=[DatasetSpec(
+            name="raw_sales",
+            owner="data-platform",
+            columns=[
+                ColumnSpec(name="net_total_usd",
+                           description="Net sale total in usd." if described else None,
+                           gold_keywords=["total", "usd"]),
+                ColumnSpec(name="buyer_email", pii="email"),
+            ],
+        )],
+    )
+    world = spec_to_world(spec)
+    return WorldCatalogContext(world), world.datasets["raw_sales"].urn
+
+
+def _doc(urn, col, desc, agent="a1"):
+    return ev("update_description", {"entity_urn": urn, "column_path": col,
+                                     "description": desc, "operation": "replace"}, agent=agent)
+
+
+def _tag(urn, col, tag="urn:li:tag:pii-email", agent="a1", status="ok"):
+    e = ev("add_tags", {"entity_urns": [urn], "column_paths": [col], "tag_urns": [tag]},
+           agent=agent)
+    return e.model_copy(update={"status": status})
+
+
+def test_a_column_the_catalog_already_documents_is_not_scored():
+    """A correct description of a documented column is not new work.
+
+    The answer was already published in the artifact the agent read, so an accept
+    here would credit text the agent did not have to derive from anything.
+    """
+    ctx, urn = _tiny_ctx(described=True)
+    gs = graded_targets(_doc(urn, "net_total_usd", "Net sale total in usd."), ctx)
+    assert len(gs) == 1
+    assert gs[0].correct is None and gs[0].rewrite is True
+
+
+def test_the_same_column_undocumented_is_scored():
+    """The control: identical write, blank column, and it grades."""
+    ctx, urn = _tiny_ctx(described=False)
+    gs = graded_targets(_doc(urn, "net_total_usd", "Net sale total in usd."), ctx)
+    assert gs[0].correct is True and gs[0].rewrite is False
+
+
+def test_two_agents_on_the_same_new_column_are_both_scored(tmp_path):
+    """Cast order must not decide who gets scored.
+
+    Occupancy is judged as of the start of the day, so both agents answer the same
+    question from the same state. If the first write consumed the surface the
+    leaderboard would be a race, and the second agent's real work would vanish.
+    """
+    ctx, urn = _tiny_ctx(described=False)
+    store = ClaimStore(str(tmp_path / "l.db"))
+    counts = settle_observations(
+        [_doc(urn, "net_total_usd", "Net sale total in usd.", agent="first"),
+         _doc(urn, "net_total_usd", "a column", agent="second")],
+        ctx, store,
+    )
+    assert counts["settled"] == 2
+    assert counts["accepted"] == 1 and counts["reverted"] == 1
+    assert counts["rewrite"] == 0
+
+
+def test_one_agent_writing_twice_in_a_day_is_scored_once(tmp_path):
+    ctx, urn = _tiny_ctx(described=False)
+    store = ClaimStore(str(tmp_path / "l.db"))
+    counts = settle_observations(
+        [_doc(urn, "net_total_usd", "Net sale total in usd.", agent="a1"),
+         _doc(urn, "net_total_usd", "Net sale total in usd, again.", agent="a1")],
+        ctx, store,
+    )
+    assert counts["recorded"] == 2, "both writes are still observed"
+    assert counts["settled"] == 1 and counts["rewrite"] == 1
+
+
+def test_yesterdays_landed_work_is_not_scored_again(tmp_path):
+    """The persistent-world defect: a day-two rewrite must not settle.
+
+    Without this the same judgment call is banked once per simulated day, and the
+    n/(n+20) shrinkage reads the repetition as accumulated evidence.
+    """
+    ctx, urn = _tiny_ctx(described=False)
+    yesterday = _tag(urn, "buyer_email", agent="tagger")
+    ledger = SurfaceLedger.as_of([yesterday], before_ts=yesterday.ts + 1)
+
+    store = ClaimStore(str(tmp_path / "l.db"))
+    counts = settle_observations([_tag(urn, "buyer_email", agent="tagger")],
+                                ctx, store, ledger=ledger)
+    assert counts["settled"] == 0 and counts["rewrite"] == 1
+
+
+def test_a_repeat_wrong_flag_cannot_bank_evidence_twice(tmp_path):
+    """Two days of the same false PII flag must leave n_settled at one."""
+    ctx, urn = _tiny_ctx(described=False)
+    wrong = _tag(urn, "net_total_usd", agent="orion-pii")  # not PII in the catalog
+    store = ClaimStore(str(tmp_path / "l.db"))
+
+    settle_observations([wrong], ctx, store)  # day one
+    ledger = SurfaceLedger.as_of([wrong], before_ts=wrong.ts + 1)
+    settle_observations([_tag(urn, "net_total_usd", agent="orion-pii")],
+                        ctx, store, ledger=ledger)  # day two, same call
+
+    rec = trust_report(store)["orion-pii"][KIND_PII]
+    assert rec["n_settled"] == 1
+
+
+def test_a_blocked_write_leaves_the_artifact_new(tmp_path):
+    """A write the gateway stopped never reached DataHub, so the column is blank.
+
+    The blocked attempt is still scored against the agent that made it; what it
+    must not do is consume the surface an honest agent works next.
+    """
+    ctx, urn = _tiny_ctx(described=False)
+    blocked = _tag(urn, "net_total_usd", agent="orion-pii", status="blocked")
+    assert graded_targets(blocked, ctx)[0].correct is False, "the attempt still counts"
+
+    ledger = SurfaceLedger.as_of([blocked], before_ts=blocked.ts + 1)
+    store = ClaimStore(str(tmp_path / "l.db"))
+    counts = settle_observations([_doc(urn, "net_total_usd", "Net sale total in usd.")],
+                                ctx, store, ledger=ledger)
+    assert counts["accepted"] == 1 and counts["rewrite"] == 0
+
+
+def test_removing_a_description_hands_the_surface_back(tmp_path):
+    """W2's doc rot is what refills the work queue, so removal must free a surface."""
+    ctx, urn = _tiny_ctx(described=False)
+    wrote = _doc(urn, "net_total_usd", "Net sale total in usd.")
+    removed = ev("update_description",
+                 {"entity_urn": urn, "column_path": "net_total_usd", "operation": "remove"},
+                 agent="rot")
+    removed = removed.model_copy(update={"ts": wrote.ts + 1})
+
+    filled = SurfaceLedger.as_of([wrote], before_ts=wrote.ts + 5)
+    assert not filled.is_new((urn, KIND_COLUMN_DOC, "net_total_usd"), "someone")
+    after = SurfaceLedger.as_of([wrote, removed], before_ts=wrote.ts + 5)
+    assert after.is_new((urn, KIND_COLUMN_DOC, "net_total_usd"), "someone")
+
+
+def test_rewrite_is_distinct_from_unscoreable(tmp_path):
+    """The two nulls must stay apart: no steward here, versus no new artifact."""
+    ctx, urn = _tiny_ctx(described=False)
+    store = ClaimStore(str(tmp_path / "l.db"))
+    counts = settle_observations(
+        [ev("add_owners", {"entity_urns": [urn],
+                           "owner_urns": ["urn:li:corpGroup:data-platform"]}, agent="mira")],
+        ctx, store,
+    )
+    assert counts["unsettled"] == 1 and counts["rewrite"] == 0
+
+
+def test_a_rewrite_is_still_recorded_for_audit(tmp_path):
+    """Withholding the score must not withhold the record of the work."""
+    ctx, urn = _tiny_ctx(described=True)
+    store = ClaimStore(str(tmp_path / "l.db"))
+    settle_observations([_doc(urn, "net_total_usd", "Net sale total in usd.")], ctx, store)
+    claims = store.claims(agent_id=composite_id("a1", KIND_COLUMN_DOC))
+    assert len(claims) == 1
+    assert claims[0].prediction["rewrite"] is True
+    assert claims[0].correct is None

@@ -38,10 +38,10 @@ from .claims import ClaimStore
 from .grounding import FindingStore, WorldCatalogContext, ground_events
 from .llm import DEFAULT_MODEL, LLMClient
 from .mcp_client import DataHubMCP
-from .observability import EventStore
+from .observability import OK, WRITE, EventStore
 from .roster import CASTABLE_KINDS, KIND_PII, ROGUE, ROSTER, cast
 from .snapshot import activity_rows, agents_rows, findings_rows
-from .trust import settle_observations
+from .trust import SurfaceLedger, settle_observations
 from .worldstore import DEFAULT_WORLDS, WorldStore, tick_seed
 
 SHOWCASE = "showcase"
@@ -298,13 +298,20 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
                                     enforce=True, world_path=spec_path, teams=teams))
 
     # ground + settle this tick's observations into the durable stores
-    new_events = EventStore(cfg.events_db).events(since_ts=tick_start)
+    events_store = EventStore(cfg.events_db)
+    new_events = events_store.events(since_ts=tick_start)
     ctx = WorldCatalogContext(world)
     with FindingStore(cfg.findings_db) as fs:
         ground_events(new_events, ctx, fs)
         n_findings_tick = len([f for f in fs.findings() if f.ts >= tick_start])
     trust_store = ClaimStore(cfg.trust_db)
-    settle = settle_observations(new_events, ctx, trust_store)
+    # only work on artifacts that were new when the day began is scored, so the
+    # ledger is built from every write that had already landed by then. urns carry
+    # the catalog id, so other worlds' history cannot collide with this one's.
+    prior = SurfaceLedger.as_of(
+        events_store.events(op=WRITE, status=OK), before_ts=tick_start
+    )
+    settle = settle_observations(new_events, ctx, trust_store, ledger=prior)
 
     # rebuild the console projection: this tick's activity + findings, full-history board
     activity = activity_rows(EventStore(cfg.events_db), owner=cfg.owner,

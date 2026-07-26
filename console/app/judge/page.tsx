@@ -67,7 +67,7 @@ export default async function JudgePage() {
       n: "04",
       title: "Score: skill separated from luck",
       body:
-        "Settled outcomes accumulate into a trust score per agent per kind of work, with a heavy tail robust test so a lucky agent does not outrank a proven one. The leaderboard ranks by earned trust.",
+        "Settled outcomes accumulate into a trust score per agent per kind of work, with a heavy tail robust test so a lucky agent does not outrank a proven one. Only work on a new artifact counts: rewriting metadata a column already carried is observed and governed but never scored, so no agent banks the same judgment call twice and no score drifts with the age of the catalog. The leaderboard ranks by earned trust.",
       live: `${scored} agents scored across ${kinds.length} work kinds`,
       link: { href: "/#leaderboard", label: "See the leaderboard" },
     },
