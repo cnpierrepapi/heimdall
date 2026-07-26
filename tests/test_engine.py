@@ -16,6 +16,7 @@ from heimdall.agentrun import RunStat
 from heimdall.catalog import CatalogSpec, DatasetSpec, save_spec, spec_to_world
 from heimdall.engine import EngineConfig, _retention_gc, health_ok, registry, run_tick
 from heimdall.roster import ROSTER
+from heimdall.trust import SurfaceLedger
 from heimdall.worldstore import WorldStore
 
 
@@ -250,3 +251,35 @@ def test_the_world_is_only_ingested_once_however_much_it_changes(tmp_path, monke
     for _ in range(5):
         run_tick(cfg)
     assert len(ingested) == 1, "the world was re-ingested instead of changed by delta"
+
+
+def test_the_tick_hands_scoring_every_write_not_only_the_ones_that_landed(
+        tmp_path, monkeypatch):
+    """A blocked write must reach the surface ledger.
+
+    It never lands, so it leaves the column open for other agents, but the agent
+    that tried has had its turn. Filtering the ledger's history to landed writes
+    is what let one refused call be re-scored every simulated day, and no unit
+    test below this seam could see it: the filter was in the query.
+    """
+    from heimdall.observability import BLOCKED, WRITE, EventStore, ObservationEvent
+
+    cfg = EngineConfig(home=str(tmp_path), worlds=1)
+    _offline_tick(monkeypatch, cfg)
+
+    urn = "urn:li:dataset:(urn:li:dataPlatform:postgres,x.raw_y,PROD)"
+    EventStore(cfg.events_db).record(ObservationEvent(
+        agent_id="orion-pii", tool="add_tags", op=WRITE, status=BLOCKED, ts=1.0,
+        args={"entity_urns": [urn], "column_paths": ["c"],
+              "tag_urns": ["urn:li:tag:pii-email"]}))
+
+    seen: list = []
+    real = SurfaceLedger.as_of
+    monkeypatch.setattr(SurfaceLedger, "as_of",
+                        classmethod(lambda cls, events, before_ts=None:
+                                    seen.append(list(events)) or real(events, before_ts)))
+
+    run_tick(cfg)
+
+    statuses = {e.status for batch in seen for e in batch}
+    assert BLOCKED in statuses, "the ledger never saw the blocked attempt"

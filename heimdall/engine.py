@@ -45,7 +45,7 @@ from .evolve import AppliedMutation, DEFAULT_PER_DAY, emit_delta, evolve_spec
 from .grounding import FindingStore, WorldCatalogContext, ground_events
 from .llm import DEFAULT_MODEL, LLMClient
 from .mcp_client import DataHubMCP
-from .observability import OK, WRITE, EventStore
+from .observability import WRITE, EventStore
 from .roster import CASTABLE_KINDS, KIND_PII, ROGUE, ROSTER, cast
 from .snapshot import activity_rows, agents_rows, findings_rows
 from .trust import SurfaceLedger, settle_observations
@@ -334,11 +334,12 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
         n_findings_tick = len([f for f in fs.findings() if f.ts >= tick_start])
     trust_store = ClaimStore(cfg.trust_db)
     # only work on artifacts that were new when the day began is scored, so the
-    # ledger is built from every write that had already landed by then. urns carry
-    # the catalog id, so other worlds' history cannot collide with this one's.
-    prior = SurfaceLedger.as_of(
-        events_store.events(op=WRITE, status=OK), before_ts=tick_start
-    )
+    # ledger is built from the whole write history up to now. every write, not
+    # only the ones that landed: a write the gateway blocked leaves the column
+    # open for other agents, but the agent that tried has had its turn at it, and
+    # filtering to landed writes here is what let a refused call be re-scored
+    # every day. urns carry the catalog id, so other worlds cannot collide.
+    prior = SurfaceLedger.as_of(events_store.events(op=WRITE), before_ts=tick_start)
     settle = settle_observations(new_events, ctx, trust_store, ledger=prior)
 
     # rebuild the console projection: this tick's activity + findings, full-history board
