@@ -1,14 +1,14 @@
 """T7 live proof: several unattended ticks accumulate into a sharper leaderboard.
 
 Runs the scheduled entrypoint several times end to end against real DataHub and a
-real LLM, exactly as the timer will: generate, ingest, cast, ground, settle,
-publish. Then asserts what the schedule is actually for, which one tick cannot
-show: each tick builds a distinct catalog, the durable stores carry evidence
-forward, and a recurring agent's settled count climbs so its trust is recomputed
-over a deeper record every time.
+real LLM, exactly as the timer will: pick a world, cast, ground, settle, publish.
+Then asserts what the schedule is actually for, which one tick cannot show: ticks
+rotate across the persistent worlds and move each one's clock forward, the durable
+stores carry evidence forward, and a recurring agent's settled count climbs so its
+trust is recomputed over a deeper record every time.
 
 Everything it publishes is read back through the anonymous console path and then
-removed, and every catalog it created is hard-deleted, so the live console is
+removed, and every world it created is hard-deleted, so the live console is
 restored to its pre-launch state.
 
 Two safety notes. The proof runs in a scratch engine home with the cutover
@@ -28,6 +28,7 @@ import shutil
 import sys
 import tempfile
 from datetime import date
+from pathlib import Path
 
 import httpx
 
@@ -87,7 +88,11 @@ def main() -> int:
         model=os.environ.get("LLM_MODEL", DEFAULT_MODEL),
     )
 
-    catalogs: list[str] = []
+    def field(line: str, key: str) -> str:
+        return line.split(f"{key}=")[1].split(" ")[0]
+
+    visited: list[tuple[str, int]] = []  # (world, day) in tick order
+    catalogs: list[str] = []  # the distinct worlds touched, for cleanup
     history: list[dict] = []
     try:
         for i in range(TICKS):
@@ -96,8 +101,10 @@ def main() -> int:
             print(f"  {run.line}")
             if run.status != STATUS_OK:
                 continue
-            spec_catalog = run.line.split("catalog=")[1].split(" ")[0]
-            catalogs.append(spec_catalog)
+            spec_catalog = field(run.line, "catalog")
+            visited.append((spec_catalog, int(field(run.line, "day"))))
+            if spec_catalog not in catalogs:
+                catalogs.append(spec_catalog)
             report = trust_report(ClaimStore(cfg.trust_db))
             history.append({a: {k: (v["n_settled"], v["trust"], v["verdict"])
                                 for k, v in kinds.items()}
@@ -105,10 +112,17 @@ def main() -> int:
             check(f"tick {i + 1} did not retire the showcase", run.cutover is False)
 
         print("\n== assertions ==")
-        ok_ticks = len(catalogs)
+        ok_ticks = len(visited)
         check("at least two ticks ran", ok_ticks >= 2, f"{ok_ticks}/{TICKS} ok")
-        check("every tick built a distinct catalog",
-              len(set(catalogs)) == ok_ticks, ", ".join(catalogs))
+        # worlds persist now, so the property is rotation rather than novelty:
+        # ticks work every world before repeating one, and each clock moves on
+        check("ticks rotated across the worlds before repeating any",
+              len(catalogs) == min(ok_ticks, cfg.worlds),
+              " -> ".join(f"{w}@day{d}" for w, d in visited))
+        for world in catalogs:
+            days = [d for w, d in visited if w == world]
+            check(f"{world} advanced one day per visit",
+                  days == list(range(days[0], days[0] + len(days))), f"days {days}")
 
         # a recurring agent is the whole point: same identity, deeper record
         recurring = []
@@ -149,17 +163,20 @@ def main() -> int:
         except Exception as exc:
             check("published proof rows removed", False, str(exc)[:120])
 
+        # sweep the whole worlds directory rather than the list of successful
+        # ticks: a tick that died after ingest would otherwise leave its world in
+        # DataHub with nothing pointing at it. this home is scratch, so every
+        # spec in it belongs to this proof.
+        specs = sorted(Path(cfg.worlds_dir).glob("*.json")) if os.path.isdir(cfg.worlds_dir) else []
         deleted = 0
-        for cat in catalogs:
-            spec_path = os.path.join(cfg.spec_dir, f"{cat}.json")
-            if os.path.exists(spec_path):
-                try:
-                    hard_delete_catalog(load_spec(spec_path), gms_url=cfg.gms_url)
-                    deleted += 1
-                except Exception:
-                    pass
-        check("proof catalogs hard-deleted from DataHub", deleted == len(catalogs),
-              f"{deleted}/{len(catalogs)}")
+        for spec_path in specs:
+            try:
+                hard_delete_catalog(load_spec(spec_path), gms_url=cfg.gms_url)
+                deleted += 1
+            except Exception:
+                pass
+        check("proof worlds hard-deleted from DataHub", bool(specs) and deleted == len(specs),
+              f"{deleted}/{len(specs)}")
         shutil.rmtree(home, ignore_errors=True)
 
     passed = sum(1 for _, ok, _ in checks if ok)

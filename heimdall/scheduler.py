@@ -86,6 +86,7 @@ def _tick_fields(result: TickResult) -> dict[str, Any]:
     applied = sum(s.applied for s in result.stats)
     return {
         "catalog": result.catalog,
+        "day": result.day,
         "seed": result.seed,
         "agents": len(result.stats),
         "applied": applied,
@@ -95,6 +96,9 @@ def _tick_fields(result: TickResult) -> dict[str, Any]:
         "settled": settle.get("settled", 0),
         "accepted": settle.get("accepted", 0),
         "reverted": settle.get("reverted", 0),
+        # writes on artifacts that were not new, so deliberately unscored. climbing
+        # while accepts fall is the world running out of work, not a worse roster
+        "rewrite": settle.get("rewrite", 0),
         "board": len(result.agents),
         "spend_tick": result.spend_tick,
         "spend_total": result.spend_total,
