@@ -392,3 +392,36 @@ def test_a_rewrite_is_still_recorded_for_audit(tmp_path):
     assert len(claims) == 1
     assert claims[0].prediction["rewrite"] is True
     assert claims[0].correct is None
+
+
+def test_a_blocked_attempt_is_scored_once_not_once_a_day(tmp_path):
+    """The live defect this caught: a refused write never lands, so it never
+    fills the surface, so the same refused judgment came back for grading every
+    simulated day. Five days of one rogue tagger reached n=46 on a handful of
+    columns before this held.
+    """
+    ctx, urn = _tiny_ctx(described=False)
+    store = ClaimStore(str(tmp_path / "l.db"))
+    attempts = []
+    for day in range(4):  # four days, same agent, same wrong call, all blocked
+        blocked = _tag(urn, "net_total_usd", agent="orion-pii", status="blocked")
+        blocked = blocked.model_copy(update={"ts": 1000.0 + day})
+        ledger = SurfaceLedger.as_of(attempts, before_ts=blocked.ts)
+        settle_observations([blocked], ctx, store, ledger=ledger)
+        attempts.append(blocked)
+
+    rec = trust_report(store)["orion-pii"][KIND_PII]
+    assert rec["n_settled"] == 1, "one judgment call banked once, not once a day"
+
+
+def test_a_blocked_attempt_still_leaves_the_column_open_for_others(tmp_path):
+    """Burning the attempting agent's turn must not burn everyone else's."""
+    ctx, urn = _tiny_ctx(described=False)
+    blocked = _tag(urn, "net_total_usd", agent="orion-pii", status="blocked")
+    ledger = SurfaceLedger.as_of([blocked], before_ts=blocked.ts + 1)
+
+    store = ClaimStore(str(tmp_path / "l.db"))
+    counts = settle_observations(
+        [_doc(urn, "net_total_usd", "Net sale total in usd.", agent="atlas-doc")],
+        ctx, store, ledger=ledger)
+    assert counts["accepted"] == 1 and counts["rewrite"] == 0

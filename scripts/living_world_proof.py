@@ -43,7 +43,6 @@ Run on the box:
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import sys
@@ -58,9 +57,18 @@ MUTATIONS = int(os.environ.get("PROOF_MUTATIONS", "2"))
 checks: list[tuple[str, bool, str]] = []
 
 
+def say(text: str = "") -> None:
+    """Print through the MCP server's own noise.
+
+    A run takes tens of minutes and the server logs tens of thousands of lines to
+    the same stream, so unflushed progress is invisible until the process exits.
+    """
+    print(text, flush=True)
+
+
 def check(name: str, passed: bool, detail: str = "") -> bool:
     checks.append((name, bool(passed), detail))
-    print(f"  [{'PASS' if passed else 'FAIL'}] {name}{(' - ' + detail) if detail else ''}")
+    say(f"  [{'PASS' if passed else 'FAIL'}] {name}{(' - ' + detail) if detail else ''}")
     return bool(passed)
 
 
@@ -113,24 +121,24 @@ def main() -> int:
     urns_by_day: list[dict[str, str]] = []
     try:
         for i in range(1, DAYS + 1):
-            print(f"\n== day {i}/{DAYS} ==")
+            say(f"\n== day {i}/{DAYS} ==")
             res = run_tick(cfg)
             if not res.ok:
                 check(f"day {i} ran", False, res.reason)
                 break
             urns_by_day.append(world_urns(res.catalog))
-            print(f"  catalog={res.catalog} day={res.day} ingested={res.ingested}")
+            say(f"  catalog={res.catalog} day={res.day} ingested={res.ingested}")
             for m in res.mutations:
-                print(f"    changed: {m['kind']:15} {m.get('dataset')}"
+                say(f"    changed: {m['kind']:15} {m.get('dataset')}"
                       f"{'.' + m['column'] if m.get('column') else ''}")
             for s in res.stats:
-                print(f"    {s.agent_id:12} {s.work_kind:11} {s.profile:8} "
+                say(f"    {s.agent_id:12} {s.work_kind:11} {s.profile:8} "
                       f"proposed={s.proposed} applied={s.applied} blocked={s.blocked}")
-            print(f"    events={res.n_events} findings={res.n_findings} "
+            say(f"    events={res.n_events} findings={res.n_findings} "
                   f"settle={res.settle} spend=${res.spend_tick:.4f}")
             days.append(res)
 
-        print("\n== assertions ==")
+        say("\n== assertions ==")
         ran = len(days)
         if not check(f"all {DAYS} days ran", ran == DAYS, f"{ran}/{DAYS}"):
             raise SystemExit(1)
@@ -211,36 +219,54 @@ def main() -> int:
         check("no agent was scored for redoing finished work",
               settle["rewrite"] == 0, f"rewrite={settle['rewrite']}")
 
-        # THE finding this whole phase exists to answer
+        # THE finding this whole phase exists to answer.
+        #
+        # Judged pooled over the later days rather than day by day, on purpose. A
+        # single day settles a handful of claims and its rate swings on which
+        # agents the cast drew and whether that day's changes happened to match
+        # their kind of work, so one day's number is noise. What must not survive
+        # is a SYSTEMATIC drop, which is what the churn-free world produced before
+        # any of this: agents rewriting finished work, and refused writes coming
+        # back for grading every day. Both of those are structural, so if either
+        # were still present the pooled figure would show it.
         rates = [(d.settle.get("accepted", 0), d.settle.get("settled", 0)) for d in days]
-        worked = [(a, s) for a, s in rates if s]
-        print("\n  per-day accept rate: " + "  ".join(
+        say("\n  per-day accept rate: " + "  ".join(
             f"day{i + 1} {a}/{s}" for i, (a, s) in enumerate(rates)))
-        check("later days still settle work",
-              len(worked) >= max(2, DAYS - 1),
-              f"{len(worked)}/{DAYS} days settled anything")
-        first_rate = worked[0][0] / worked[0][1]
-        last_rate = worked[-1][0] / worked[-1][1]
-        check("the accept rate did not decay with world age",
-              last_rate >= first_rate * 0.5,
-              f"first {first_rate:.0%} -> last {last_rate:.0%}")
+        check("every day settled some work",
+              all(s for _, s in rates), f"{sum(1 for _, s in rates if s)}/{DAYS} days")
+
+        first_a, first_s = rates[0]
+        later_a, later_s = (sum(a for a, _ in rates[1:]), sum(s for _, s in rates[1:]))
+        first_rate = first_a / first_s
+        later_rate = later_a / later_s if later_s else 0.0
+        check("work is still being accepted after the world has aged",
+              later_a > 0, f"{later_a} accepts across days 2 to {DAYS}")
+        check("the accept rate did not collapse with world age",
+              later_rate >= first_rate * 0.5,
+              f"day one {first_a}/{first_s} = {first_rate:.0%}, "
+              f"days 2 to {DAYS} {later_a}/{later_s} = {later_rate:.0%}")
 
         # -- scoring stayed honest --------------------------------------------
         store = ClaimStore(cfg.trust_db)
         report = trust_report(store)
-        print("\n  === leaderboard after "
+        say("\n  === leaderboard after "
               f"{DAYS} simulated days ===")
         for agent, by_kind in sorted(report.items()):
             for kind, rec in sorted(by_kind.items()):
-                print(f"    {agent:12} {kind:11} trust {str(rec['trust']):>5} "
+                say(f"    {agent:12} {kind:11} trust {str(rec['trust']):>5} "
                       f"n={rec['n_settled']:<3} {rec['score_state']:12} {rec['verdict']}")
         seen = Counter()
         for c in store.claims():
             if c.settled:
                 seen[(c.agent_id, c.entity_urn, c.prediction.get("column"))] += 1
+        repeats = {k: v for k, v in seen.items() if v > 1}
         check("no agent was scored twice on the same column",
-              not any(v > 1 for v in seen.values()),
-              f"{len(seen)} distinct scored surfaces")
+              not repeats,
+              f"{len(seen)} distinct scored surfaces"
+              + ("; worst: " + "; ".join(
+                  f"{a.split('::')[0]} x{v} on {c}"
+                  for (a, _, c), v in sorted(repeats.items(), key=lambda kv: -kv[1])[:3])
+                 if repeats else ""))
         unscoreable = [rec for by_kind in report.values() for kind, rec in by_kind.items()
                        if rec["score_state"] == "unscoreable"]
         check("unscoreable work settled nothing",
@@ -263,10 +289,10 @@ def main() -> int:
         check("retention never saw the living world",
               os.listdir(cfg.spec_dir) == [] and not any(d.gc_deleted for d in days))
 
-        print(f"\n  total spend ${days[-1].spend_total:.4f} over {DAYS} days")
+        say(f"\n  total spend ${days[-1].spend_total:.4f} over {DAYS} days")
 
     finally:
-        print("\n== cleanup ==")
+        say("\n== cleanup ==")
         if spec is None:
             try:
                 with WorldStore(cfg.worlds_db, cfg.worlds_dir) as store3:
@@ -281,7 +307,7 @@ def main() -> int:
         shutil.rmtree(home, ignore_errors=True)
 
     passed = sum(1 for _, ok, _ in checks if ok)
-    print(f"\n{passed}/{len(checks)} checks passed")
+    say(f"\n{passed}/{len(checks)} checks passed")
     return 0 if passed == len(checks) else 1
 
 

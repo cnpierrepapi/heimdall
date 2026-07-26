@@ -127,9 +127,14 @@ class SurfaceLedger:
     DataHub, so it leaves the surface new for whoever comes next; a removal frees
     the surface it emptied.
 
-    Within a tick the ledger also remembers which (agent, surface) pairs it has
-    already graded, so one agent writing the same column twice in a day is scored
-    once. Two different agents writing it are both scored: that is the comparison.
+    The ledger also remembers which (agent, surface) pairs have already been
+    graded, and that memory outlives the tick. An agent gets one turn per surface,
+    ever. Without it a write the gateway blocks is scored again every day: it never
+    lands, so it never fills the surface, so the same refused judgment comes back
+    for grading tomorrow and the day after. A live run scored one rogue tagger
+    forty-six times over five days on a handful of columns, which is one judgment
+    call wearing forty-six coats. Two different agents writing the same new column
+    are still both scored: that is the comparison the leaderboard is for.
     """
 
     def __init__(self, filled: Optional[Iterable[Surface]] = None):
@@ -149,8 +154,14 @@ class SurfaceLedger:
         return ledger
 
     def absorb(self, event: ObservationEvent) -> None:
-        """Apply one observed write to occupancy. Only landed writes count."""
-        if event.op != WRITE or event.status != OK:
+        """Apply one observed write to occupancy.
+
+        Two different effects, and conflating them is what let a blocked write be
+        scored forever. Only a write that landed puts metadata on the surface. But
+        any attempt, landed, blocked or held, uses up the attempting agent's turn
+        at that surface, because repeating a judgment is not new evidence about it.
+        """
+        if event.op != WRITE:
             return
         action = parse_action(event)
         removal = action.tool.startswith("remove_") or action.operation == "remove"
@@ -161,7 +172,9 @@ class SurfaceLedger:
         for surface in _surfaces(action):
             if removal:
                 self.filled.discard(surface)
-            else:
+                continue
+            self.graded.add((event.agent_id, surface))
+            if event.status == OK:
                 self.filled.add(surface)
 
     def is_new(self, surface: Surface, agent_id: str) -> bool:
