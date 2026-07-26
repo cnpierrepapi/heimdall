@@ -36,6 +36,15 @@ Runs in a scratch engine home so the live showcase feed is untouched, overrides
 the activation date locally while the installed timer stays dormant, and hard
 deletes the world it created on the way out.
 
+It also mints its own world, under urns no previous run has used. That is not
+tidiness, it is the difference between a valid proof and an invalid one. A hard
+delete removes the dataset entity but not DataHub's editable overlay, so
+re-ingesting a urn a previous run used brings that run's agent-written
+descriptions and tags back with it. A second run against the same namespace
+therefore starts on a world that is already half finished, its documenters find
+nothing to do, and the day-one baseline every later day is compared against is
+quietly wrong. Isolation has to come from the namespace, not from the cleanup.
+
 Run on the box:
     set -a; . ~/.heimdall/env; set +a
     PROOF_DAYS=5 ~/fresh-e2e/v/bin/python scripts/living_world_proof.py
@@ -44,6 +53,7 @@ Run on the box:
 from __future__ import annotations
 
 import os
+import random
 import shutil
 import sys
 import tempfile
@@ -53,6 +63,8 @@ from datetime import date
 DAYS = int(os.environ.get("PROOF_DAYS", "5"))
 CAST = int(os.environ.get("PROOF_CAST", "3"))
 MUTATIONS = int(os.environ.get("PROOF_MUTATIONS", "2"))
+# a fresh namespace per run unless one is pinned to reproduce a specific world
+BASE = int(os.environ.get("PROOF_BASE_SEED", str(random.randint(10_000, 9_000_000))))
 
 checks: list[tuple[str, bool, str]] = []
 
@@ -101,9 +113,11 @@ def main() -> int:
         model=os.environ.get("LLM_MODEL", DEFAULT_MODEL),
         cast_size=CAST,
         worlds=1,  # one world, so every day lands on it
+        base_seed=BASE,  # a namespace of this run's own, see the module docstring
         mutations_per_day=MUTATIONS,
     )
     graph = DataHubGraph(DatahubClientConfig(server=cfg.gms_url))
+    say(f"world namespace seed {BASE}; replay with PROOF_BASE_SEED={BASE}")
 
     def live_schema(urn: str) -> dict:
         """The real column state in DataHub, keyed by column name."""

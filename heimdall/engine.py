@@ -49,7 +49,7 @@ from .observability import WRITE, EventStore
 from .roster import CASTABLE_KINDS, KIND_PII, ROGUE, ROSTER, cast
 from .snapshot import activity_rows, agents_rows, findings_rows
 from .trust import SurfaceLedger, settle_observations
-from .worldstore import DEFAULT_WORLDS, WorldStore, tick_seed
+from .worldstore import BASE_SEED, DEFAULT_WORLDS, WorldStore, tick_seed
 
 SHOWCASE = "showcase"
 
@@ -63,6 +63,10 @@ class EngineConfig:
     cast_size: int = 4
     retention: int = 12
     worlds: int = DEFAULT_WORLDS
+    # where the world roster is drawn from. changing it mints a different roster
+    # under different urns, which is how a proof run gets a namespace of its own
+    # rather than inheriting whatever a previous run left behind.
+    base_seed: int = BASE_SEED
     mutations_per_day: int = DEFAULT_PER_DAY
     owner: str = SHOWCASE
 
@@ -114,6 +118,7 @@ def load_config() -> EngineConfig:
         cast_size=int(os.environ.get("HEIMDALL_CAST_SIZE", "4")),
         retention=int(os.environ.get("HEIMDALL_RETENTION", "12")),
         worlds=int(os.environ.get("HEIMDALL_WORLDS", str(DEFAULT_WORLDS))),
+        base_seed=int(os.environ.get("HEIMDALL_BASE_SEED", str(BASE_SEED))),
         mutations_per_day=int(os.environ.get("HEIMDALL_MUTATIONS", str(DEFAULT_PER_DAY))),
     )
 
@@ -261,7 +266,7 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
     # pick the persistent world whose clock is furthest behind and work it
     store = WorldStore(cfg.worlds_db, cfg.worlds_dir)
     try:
-        store.seed(cfg.worlds)  # first tick ever; a no-op on every tick after
+        store.seed(cfg.worlds, base_seed=cfg.base_seed)  # once ever; then a no-op
         rec = store.next_world()
         if rec is None:
             return TickResult(ok=False, reason="no worlds seeded")
