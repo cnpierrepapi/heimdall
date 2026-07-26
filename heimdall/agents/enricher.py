@@ -21,7 +21,13 @@ from typing import Any
 from ..claims import ENRICHMENT, Claim
 from ..llm import LLMClient
 from ..mcp_client import DataHubMCP
-from .common import as_text, clamp_confidence, extract_dataset_urns
+from .common import (
+    as_text,
+    clamp_confidence,
+    extract_dataset_urns,
+    field_description,
+    schema_fields,
+)
 
 _SYSTEM = """You are a data steward writing column documentation for a warehouse catalog.
 
@@ -34,13 +40,17 @@ Confidence is your probability that a human steward would ACCEPT your descriptio
 
 
 def undocumented_columns(schema: Any) -> list[str]:
-    """Field paths with no usable description in a list_schema_fields result."""
-    if not isinstance(schema, dict):
-        return []
+    """Field paths with no usable description in a list_schema_fields result.
+
+    A documented column is finished work, whether the catalog shipped the
+    description or an agent wrote it earlier, so it is not a target. Checking only
+    the catalog's own key would send the agent back over ground another agent has
+    already covered, every day, forever.
+    """
     return [
         f["fieldPath"]
-        for f in schema.get("fields", [])
-        if f.get("fieldPath") and not str(f.get("description") or "").strip()
+        for f in schema_fields(schema)
+        if f.get("fieldPath") and not field_description(f)
     ]
 
 

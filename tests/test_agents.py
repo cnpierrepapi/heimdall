@@ -17,8 +17,14 @@ from heimdall.agents import (
     FreshnessSentinelAgent,
     TriageAgent,
 )
-from heimdall.agents.common import clamp_confidence, extract_dataset_urns
+from heimdall.agents.common import (
+    clamp_confidence,
+    extract_dataset_urns,
+    field_description,
+    field_has_pii_tag,
+)
 from heimdall.agents.enricher import undocumented_columns
+from heimdall.agents.piitagger import PiiTaggerAgent, untagged_columns
 from heimdall.claims import ENRICHMENT, FRESHNESS_SLA, ROOT_CAUSE
 
 URN_A = "urn:li:dataset:(urn:li:dataPlatform:postgres,db.a,PROD)"
@@ -197,3 +203,73 @@ def test_triage_no_candidates_returns_none():
     llm = FakeLLM([])
     agent = TriageAgent(FakeMCP(), llm)
     assert agent.diagnose("urn:li:incident:x", URN_A, "stale", []) is None
+
+
+# -- finished work is not work ------------------------------------------------
+#
+# DataHub keeps the catalog's own description under `description` and anything
+# written since under `editedDescription`, and an applied tag under `editedTags`.
+# These shapes came from probing the live MCP server. An agent that reads the
+# wrong key redoes finished work every single day, which is exactly what was
+# happening: the enricher checked `description` only, so every column an agent
+# had documented still looked blank to the next agent.
+
+
+def _field(path, **kw):
+    return {"fieldPath": path, "nativeDataType": "text", **kw}
+
+
+def _schema(*fields):
+    return {"urn": URN_A, "fields": list(fields)}
+
+
+def test_a_description_counts_from_either_source():
+    assert field_description(_field("a", description="catalog wrote this")) != ""
+    assert field_description(_field("a", editedDescription="an agent wrote this")) != ""
+    assert field_description(_field("a")) == ""
+    assert field_description(_field("a", editedDescription="   ")) == ""
+
+
+def test_undocumented_skips_what_an_agent_already_documented():
+    """The live bug: agent-written docs were invisible, so the work never ended."""
+    schema = _schema(
+        _field("blank"),
+        _field("shipped", description="Catalog shipped this."),
+        _field("agent_did_this", editedDescription="An agent wrote this yesterday."),
+    )
+    assert undocumented_columns(schema) == ["blank"]
+
+
+def test_untagged_skips_what_is_already_classified():
+    schema = _schema(
+        _field("email", editedTags=["pii-email"]),
+        _field("customer_id"),
+        _field("full_name", editedTags=["pii-person_name"]),
+    )
+    assert untagged_columns(schema) == ["customer_id"]
+    assert field_has_pii_tag(_field("x", editedTags=["tier-gold"])) is False
+
+
+def test_the_tagger_does_no_work_on_a_fully_classified_table():
+    """A finished table costs nothing: no model call, no claim, no spend."""
+    llm = FakeLLM([])  # popping a response would raise, so none may be requested
+    mcp = FakeMCP(schemas={URN_A: _schema(
+        _field("email", editedTags=["pii-email"]),
+        _field("full_name", editedTags=["pii-person_name"]),
+    )})
+    assert PiiTaggerAgent(mcp, llm).propose(URN_A) == []
+    assert llm.prompts == []
+
+
+def test_the_tagger_will_not_reclassify_a_tagged_column():
+    """Even if the model insists, a settled column is not this agent's to claim."""
+    llm = FakeLLM([{"flags": [
+        {"column": "email", "pii_type": "email", "confidence": 0.9},      # done
+        {"column": "phone", "pii_type": "phone", "confidence": 0.8},      # open
+    ]}])
+    mcp = FakeMCP(schemas={URN_A: _schema(
+        _field("email", editedTags=["pii-email"]),
+        _field("phone"),
+    )})
+    claims = PiiTaggerAgent(mcp, llm).propose(URN_A)
+    assert [c.prediction["column"] for c in claims] == ["phone"]

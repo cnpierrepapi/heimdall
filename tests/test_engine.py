@@ -70,10 +70,12 @@ def test_retention_gc_deletes_oldest_beyond_window(tmp_path, monkeypatch):
 
 
 def _offline_tick(monkeypatch, cfg: EngineConfig) -> list[CatalogSpec]:
-    """Stub the tick at its two network edges and return what it ingests.
+    """Stub the tick at its network edges and return what it ingests.
 
     Everything else runs for real: world selection, the ingest-once decision, the
-    clock, grounding, settlement and the projection rebuild over empty stores.
+    clock, which mutations the world gets, grounding, settlement and the projection
+    rebuild over empty stores. The delta emitter is stubbed rather than the
+    evolution itself, so the spec really does change under the tick.
     """
     monkeypatch.setenv("HEIMDALL_START_DATE", "2020-01-01")  # past the activation gate
     monkeypatch.setattr("heimdall.engine.health_ok", lambda c: (True, "healthy"))
@@ -82,6 +84,8 @@ def _offline_tick(monkeypatch, cfg: EngineConfig) -> list[CatalogSpec]:
     import heimdall.ingest as ing
     monkeypatch.setattr(ing, "ingest_spec",
                         lambda spec, gms_url=None, **kw: ingested.append(spec) or 0)
+    monkeypatch.setattr("heimdall.engine.emit_delta",
+                        lambda spec, muts, **kw: len(muts))
     monkeypatch.setattr(
         "heimdall.engine._run_agent",
         lambda cfg, ragent, spend, urns, **kw: RunStat(
@@ -158,3 +162,91 @@ def test_the_tick_never_writes_into_the_retention_directory(tmp_path, monkeypatc
     assert os.listdir(cfg.spec_dir) == []
     assert os.path.exists(os.path.join(cfg.worlds_dir, f"{result.catalog}.json"))
     assert result.gc_deleted == []
+
+
+# -- the world evolves, so the work never runs out ----------------------------
+
+
+def _open_work(cfg: EngineConfig, catalog: str) -> set[tuple[str, str]]:
+    """(dataset, column) pairs still undocumented in the world's own truth."""
+    with WorldStore(cfg.worlds_db, cfg.worlds_dir) as s:
+        spec = s.spec(catalog)
+    return {(d.name, c.name) for d in spec.datasets for c in d.columns
+            if not c.description}
+
+
+def test_a_brand_new_world_is_not_mutated_on_its_first_day(tmp_path, monkeypatch):
+    """Day one is already all new work; changing it would just be noise."""
+    cfg = EngineConfig(home=str(tmp_path), worlds=1)
+    _offline_tick(monkeypatch, cfg)
+    assert run_tick(cfg).mutations == []
+
+
+def test_later_days_change_the_world(tmp_path, monkeypatch):
+    cfg = EngineConfig(home=str(tmp_path), worlds=1)
+    _offline_tick(monkeypatch, cfg)
+
+    run_tick(cfg)
+    second = run_tick(cfg)
+
+    assert second.mutations, "day two left the world exactly as it was"
+    assert all(m["kind"] and m["day"] == 2 for m in second.mutations)
+
+
+def test_evolution_is_recorded_in_the_mutation_log(tmp_path, monkeypatch):
+    """The log is history an agent is invited to predict from, so it must match."""
+    cfg = EngineConfig(home=str(tmp_path), worlds=1)
+    _offline_tick(monkeypatch, cfg)
+
+    run_tick(cfg)
+    result = run_tick(cfg)
+
+    with WorldStore(cfg.worlds_db, cfg.worlds_dir) as s:
+        logged = s.mutations(world_id=result.catalog)
+    assert [m.kind for m in logged] == [m["kind"] for m in result.mutations]
+    assert all(m.day == 2 for m in logged)
+
+
+def test_a_world_never_runs_out_of_work(tmp_path, monkeypatch):
+    """The reason evolution exists.
+
+    Documenting is one way work leaves the queue, so the queue has to be refilled
+    or the leaderboard freezes while ticks keep burning budget. Here nothing is
+    documented at all, so this checks the supply side alone: change keeps arriving.
+    """
+    cfg = EngineConfig(home=str(tmp_path), worlds=1)
+    _offline_tick(monkeypatch, cfg)
+
+    first = run_tick(cfg)
+    start = _open_work(cfg, first.catalog)
+    for _ in range(8):
+        run_tick(cfg)
+    later = _open_work(cfg, first.catalog)
+
+    assert later - start, "eight simulated days produced no new work"
+
+
+def test_evolution_never_moves_an_existing_dataset(tmp_path, monkeypatch):
+    """A settled claim and a published console link both point at a urn."""
+    cfg = EngineConfig(home=str(tmp_path), worlds=1)
+    _offline_tick(monkeypatch, cfg)
+
+    def urns() -> set[str]:
+        with WorldStore(cfg.worlds_db, cfg.worlds_dir) as s:
+            world = spec_to_world(s.spec(s.next_world().world_id))
+        return {d.urn for d in world.datasets.values()}
+
+    run_tick(cfg)
+    day_one = urns()
+    for _ in range(6):
+        run_tick(cfg)
+
+    assert day_one <= urns(), "a urn published on day one stopped resolving"
+
+
+def test_the_world_is_only_ingested_once_however_much_it_changes(tmp_path, monkeypatch):
+    cfg = EngineConfig(home=str(tmp_path), worlds=1)
+    ingested = _offline_tick(monkeypatch, cfg)
+    for _ in range(5):
+        run_tick(cfg)
+    assert len(ingested) == 1, "the world was re-ingested instead of changed by delta"

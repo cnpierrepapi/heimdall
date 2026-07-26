@@ -10,6 +10,12 @@ The worlds themselves persist too. A small roster is seeded once and never
 deleted, which is what lets a claim made on one day settle on the next. Worlds
 round-robin by whichever clock is furthest behind, so they age evenly.
 
+Persisting alone would freeze the leaderboard, because a world whose columns are
+all documented offers an honest agent nothing left to do. So each day after its
+first the world also evolves: columns appear, documentation rots, tables arrive,
+applied to DataHub as a delta on the affected datasets. Agents are pointed at the
+raw layer plus whatever changed today, which is the work that is actually open.
+
 The tick is defensive by construction. It takes a file lock so a slow tick blocks
 the next rather than overlapping. It refuses to run before the activation date or
 once the budget cap is reached (no fallback: the pipeline simply stops). It skips
@@ -35,6 +41,7 @@ from .agentrun import RunStat, run_roster_agent
 from .budget import SpendLedger, can_run, tick_subcap
 from .catalog import load_spec, spec_to_world
 from .claims import ClaimStore
+from .evolve import AppliedMutation, DEFAULT_PER_DAY, emit_delta, evolve_spec
 from .grounding import FindingStore, WorldCatalogContext, ground_events
 from .llm import DEFAULT_MODEL, LLMClient
 from .mcp_client import DataHubMCP
@@ -56,6 +63,7 @@ class EngineConfig:
     cast_size: int = 4
     retention: int = 12
     worlds: int = DEFAULT_WORLDS
+    mutations_per_day: int = DEFAULT_PER_DAY
     owner: str = SHOWCASE
 
     @property
@@ -106,6 +114,7 @@ def load_config() -> EngineConfig:
         cast_size=int(os.environ.get("HEIMDALL_CAST_SIZE", "4")),
         retention=int(os.environ.get("HEIMDALL_RETENTION", "12")),
         worlds=int(os.environ.get("HEIMDALL_WORLDS", str(DEFAULT_WORLDS))),
+        mutations_per_day=int(os.environ.get("HEIMDALL_MUTATIONS", str(DEFAULT_PER_DAY))),
     )
 
 
@@ -122,6 +131,7 @@ class TickResult:
     day: Optional[int] = None  # that world's simulated day after the advance
     ingested: bool = False  # True on a world's first ever tick
     seed: Optional[int] = None
+    mutations: list[dict] = field(default_factory=list)  # what changed today
     stats: list[RunStat] = field(default_factory=list)
     n_events: int = 0
     n_findings: int = 0
@@ -257,12 +267,9 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
             return TickResult(ok=False, reason="no worlds seeded")
         spec = store.spec(rec.world_id)
         spec_path = store.spec_path(rec.world_id)
-        world = spec_to_world(spec)
-        raw_urns = [world.datasets[d.name].urn for d in spec.datasets
-                    if d.name.startswith("raw_")]
 
-        # a world enters DataHub once. later ticks change it by delta (W2), never
-        # by re-ingest, so its URNs and the console's deep-links stay put.
+        # a world enters DataHub once. later ticks change it by delta, never by
+        # re-ingest, so its URNs and the console's deep-links stay put.
         first_ingest = not rec.ingested
         if first_ingest:
             from .ingest import ingest_spec
@@ -270,8 +277,29 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
             store.mark_ingested(rec.world_id)
 
         day = store.advance(rec.world_id)
+
+        # a brand-new world is already all new work, so it is left alone on its
+        # first day. after that the world has to change or the agents run out of
+        # anything to be judged on and the leaderboard freezes while ticks burn.
+        mutations: list[AppliedMutation] = []
+        if not first_ingest and cfg.mutations_per_day > 0:
+            spec, mutations = evolve_spec(spec, day, rec.seed,
+                                          per_day=cfg.mutations_per_day)
+            if mutations:
+                emit_delta(spec, mutations, gms_url=cfg.gms_url)
+                store.write_spec(spec)  # the gateway grounds against this file
+                for m in mutations:
+                    store.record_mutation(rec.world_id, day, m.kind, m.payload)
     finally:
         store.close()
+
+    # rebuilt from the mutated spec, so a column added a moment ago is real to
+    # the agents and to grounding. built from the stale spec, a new column would
+    # be graded as one the schema does not have.
+    world = spec_to_world(spec)
+    changed = {name for m in mutations for name in m.datasets}
+    targets = [world.datasets[d.name].urn for d in spec.datasets
+               if d.name.startswith("raw_") or d.name in changed]
 
     # the cast follows the world's own clock, so a day can be replayed exactly
     seed = seed if seed is not None else tick_seed(rec.world_id, day)
@@ -290,11 +318,11 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
         runnable, _ = can_run(spend)
         if not runnable or spend.spent_since(tick_start) >= tick_subcap():
             break  # budget guard: stop casting, no fallback
-        stats.append(_run_agent(cfg, ragent, spend, raw_urns, teams=teams))
+        stats.append(_run_agent(cfg, ragent, spend, targets, teams=teams))
     if enforce_agent is not None and spend.spent_since(tick_start) < tick_subcap():
         runnable, _ = can_run(spend)
         if runnable:
-            stats.append(_run_agent(cfg, enforce_agent, spend, raw_urns,
+            stats.append(_run_agent(cfg, enforce_agent, spend, targets,
                                     enforce=True, world_path=spec_path, teams=teams))
 
     # ground + settle this tick's observations into the durable stores
@@ -327,6 +355,7 @@ def _tick_body(cfg: EngineConfig, seed: Optional[int]) -> TickResult:
     return TickResult(
         ok=True, catalog=spec.catalog, day=day, ingested=first_ingest,
         seed=seed, stats=stats,
+        mutations=[{"kind": m.kind, **m.payload} for m in mutations],
         n_events=len(new_events), n_findings=n_findings_tick, settle=settle,
         spend_tick=spend.spent_since(tick_start), spend_total=spend.total(),
         activity=activity, findings=findings, agents=agents, gc_deleted=gc,

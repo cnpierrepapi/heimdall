@@ -87,6 +87,9 @@ def _tick_fields(result: TickResult) -> dict[str, Any]:
     return {
         "catalog": result.catalog,
         "day": result.day,
+        # what the world did to itself today, so a tick that stopped generating
+        # work is visible in the log rather than only in a flat leaderboard
+        "changed": ",".join(m["kind"] for m in result.mutations) or "-",
         "seed": result.seed,
         "agents": len(result.stats),
         "applied": applied,

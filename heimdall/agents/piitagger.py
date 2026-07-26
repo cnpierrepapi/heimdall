@@ -19,9 +19,24 @@ import time
 from ..claims import ENRICHMENT, Claim
 from ..llm import LLMClient
 from ..mcp_client import DataHubMCP
-from .common import as_text, clamp_confidence
+from .common import as_text, clamp_confidence, field_has_pii_tag, schema_fields
 
 PII_TYPES = ("email", "person_name", "phone", "address", "national_id")
+
+
+def untagged_columns(schema: Any) -> list[str]:
+    """Field paths that carry no PII tag yet, so are still open work.
+
+    A column that has already been classified is finished, and re-classifying it
+    every day is not new work: it re-states one judgment call as if it were fresh
+    evidence. Whether that judgment was right or wrong, repeating it says nothing
+    new about the agent.
+    """
+    return [
+        f["fieldPath"]
+        for f in schema_fields(schema)
+        if f.get("fieldPath") and not field_has_pii_tag(f)
+    ]
 
 _SYSTEM = """You are a data protection reviewer classifying warehouse columns for PII.
 
@@ -51,11 +66,14 @@ class PiiTaggerAgent:
 
     def propose(self, dataset_urn: str, model_id: str = "") -> list[Claim]:
         schema = self.mcp.list_schema_fields(dataset_urn)
-        known = {
-            f.get("fieldPath")
-            for f in (schema.get("fields", []) if isinstance(schema, dict) else [])
-        }
-        user = f"TABLE: {dataset_urn}\nSCHEMA: {as_text(schema, 2500)}"
+        open_work = set(untagged_columns(schema))
+        if not open_work:
+            return []  # every column here is already classified, nothing to do
+        user = (
+            f"TABLE: {dataset_urn}\nSCHEMA: {as_text(schema, 2500)}\n\n"
+            f"UNCLASSIFIED COLUMNS ({len(open_work)}): {', '.join(sorted(open_work))}\n"
+            "Columns not in that list are already classified. Do not flag them."
+        )
         parsed = self.llm.chat_json(self.system, user, max_tokens=800)
 
         claims: list[Claim] = []
@@ -65,8 +83,10 @@ class PiiTaggerAgent:
                 continue
             column = flag.get("column")
             pii_type = flag.get("pii_type")
-            if column not in known or pii_type not in PII_TYPES:
-                continue  # hallucinated column or type: nothing to claim
+            # a hallucinated column, a bad type, or a column somebody already
+            # classified: none of them are a claim this agent gets to make
+            if column not in open_work or pii_type not in PII_TYPES:
+                continue
             claims.append(
                 Claim(
                     agent_id=self.agent_id,

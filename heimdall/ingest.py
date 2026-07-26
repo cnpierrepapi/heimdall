@@ -17,7 +17,7 @@ best effort per entity so a single degraded-ES delete cannot strand the tick
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from .catalog import CatalogSpec, spec_to_world
 
@@ -49,8 +49,14 @@ def catalog_dataset_urns(spec: CatalogSpec) -> list[str]:
     return [world.datasets[d.name].urn for d in spec.datasets]
 
 
-def build_mcps(spec: CatalogSpec) -> list[Any]:
-    """All MetadataChangeProposals to create this catalog: schema, props, lineage."""
+def build_mcps(spec: CatalogSpec, only: Optional[Iterable[str]] = None) -> list[Any]:
+    """All MetadataChangeProposals to create this catalog: schema, props, lineage.
+
+    `only` restricts which datasets get proposals, which is how a change is applied
+    as a delta. The world is still built from the whole spec, because a dataset's
+    lineage names upstreams that are not themselves changing; filtering the spec
+    down first would make those upstreams look like they do not exist.
+    """
     c = _classes()
     MCPW = c["MetadataChangeProposalWrapper"]
     world = spec_to_world(spec)
@@ -59,8 +65,11 @@ def build_mcps(spec: CatalogSpec) -> list[Any]:
     if spec.theme:
         props["heimdall_theme"] = spec.theme
 
+    wanted = None if only is None else set(only)
     mcps: list[Any] = []
     for ds in spec.datasets:
+        if wanted is not None and ds.name not in wanted:
+            continue
         urn = world.datasets[ds.name].urn
         fields = [
             c["SchemaFieldClass"](
