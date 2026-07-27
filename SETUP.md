@@ -75,7 +75,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Expected: the full suite passes (167 tests today). These cover the gateway
+Expected: the full suite passes (298 tests today). These cover the gateway
 capture, the catalog-grounded evaluators, settlement, the skill-vs-luck test,
 per-agent trust, policy decisions, writeback, and selection.
 

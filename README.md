@@ -110,6 +110,14 @@ console/           the Next.js console
 tests/             the test suite
 ```
 
+## How it works
+
+[TECHNICAL.md](TECHNICAL.md) covers the internals: the gateway's policy tiers, the
+skill-versus-luck test and why the luck baseline for a description is the pooled
+steward acceptance rate rather than a coin flip, why only work on a new artifact is
+scored, why ownership is deliberately never scored at all, and how the living
+catalog engine keeps worlds persistent while still generating new work.
+
 ## Tests
 
 ```bash
